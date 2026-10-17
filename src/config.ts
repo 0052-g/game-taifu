@@ -1,6 +1,6 @@
 /** All game balance values live here; these are playful approximations, not forecasts. */
 export const SIMULATION_CONFIG = {
-  initialStrength: 76,
+  initialStrength: 58,
   initialStability: 90,
   movementSpeed: 72,
   daysPerSecond: 0.6,
@@ -8,8 +8,8 @@ export const SIMULATION_CONFIG = {
   minimumStrength: 5,
   minimumStability: 13,
   winterDay: 91, // September 1 → December 1.
-  oceanStrengthRecovery: 4.8,
-  oceanStabilityRecovery: 0.45,
+  oceanStrengthRecovery: 3.2,
+  oceanStabilityRecovery: 1.15,
   oceanStabilityWear: 0.1,
   coldSeaStrengthDecay: 5,
   coldSeaStabilityDecay: 0.8,
@@ -21,6 +21,8 @@ export const SIMULATION_CONFIG = {
   stabilityCapFactor: 0.85,
   lifetimeCapacityLossPerDay: 0.28,
   cityExposureExponent: 2,
+  cityPassDamageFraction: 0.5,
+  cityVisitExitMargin: 0.35,
   cityEventExposure: 0.25,
   maxEvents: 8,
 } as const;

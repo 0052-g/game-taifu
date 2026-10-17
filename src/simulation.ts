@@ -59,6 +59,10 @@ export function createSimulation(route: Point[]): SimulationState {
     remaining: city.weight,
     damage: 0,
     peakExposure: 0,
+    activeVisit: false,
+    visitPeakExposure: 0,
+    visitStartingRemaining: city.weight,
+    visitCount: 0,
   }]));
   return {
     route: cleanRoute,
@@ -89,17 +93,34 @@ function updateDamage(state: SimulationState): void {
   let affected = 0;
   for (const city of CITIES) {
     const asset = state.cityDamage[city.id];
-    const radial = Math.max(0, 1 - distance(state.position, city.position) / city.radius);
-    // Smooth radial falloff; local damage is the strongest historical exposure, not time spent.
+    const cityDistance = distance(state.position, city.position);
+    if (asset.activeVisit && cityDistance > city.radius * (1 + CONFIG.cityVisitExitMargin)) {
+      asset.activeVisit = false;
+    }
+    if (!asset.activeVisit && cityDistance < city.radius && asset.remaining > EPSILON) {
+      asset.activeVisit = true;
+      asset.visitPeakExposure = 0;
+      asset.visitStartingRemaining = asset.remaining;
+      asset.visitCount++;
+    }
+    const radial = Math.max(0, 1 - cityDistance / city.radius);
+    // One visit consumes a bounded share of the assets present at entry. Staying or
+    // making tiny loops only improves that visit's peak; a clear exit permits a new visit.
     const influence = radial * radial * (3 - 2 * radial);
     const exposure = Math.pow(state.strength / 100, CONFIG.cityExposureExponent) * influence;
-    if (exposure > asset.peakExposure) {
-      const previous = asset.peakExposure;
-      asset.peakExposure = exposure;
-      asset.damage = city.weight * exposure;
-      asset.remaining = Math.max(0, city.weight - asset.damage);
+    asset.peakExposure = Math.max(asset.peakExposure, exposure);
+    if (asset.activeVisit && exposure > asset.visitPeakExposure) {
+      const previous = asset.visitPeakExposure;
+      asset.visitPeakExposure = exposure;
+      const visitDamage = asset.visitStartingRemaining * CONFIG.cityPassDamageFraction * exposure;
+      asset.remaining = Math.max(0, asset.visitStartingRemaining - visitDamage);
+      asset.damage = city.weight - asset.remaining;
       if (previous < CONFIG.cityEventExposure && exposure >= CONFIG.cityEventExposure) {
-        emit(state, { kind: 'city', text: `${city.name}に直撃！`, score: Math.round(asset.damage) });
+        emit(state, {
+          kind: 'city',
+          text: `${city.name}に${asset.visitCount > 1 ? '再' : ''}直撃！`,
+          score: Math.round(visitDamage),
+        });
       }
     }
     total += asset.damage;

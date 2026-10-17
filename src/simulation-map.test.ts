@@ -29,9 +29,11 @@ describe('playability on Japan game geography', () => {
     expect(state.elapsedSeconds).toBeGreaterThan(7);
     expect(state.elapsedSeconds).toBeLessThan(9);
     expect(state.elapsedDays).toBeLessThan(6);
-    expect(state.strength).toBeGreaterThan(80);
+    expect(state.strength).toBeGreaterThan(60);
+    expect(state.strength).toBeLessThan(85);
     expect(state.stability).toBeGreaterThan(80);
-    expect(state.score).toBeGreaterThan(200_000);
+    expect(state.score).toBeGreaterThan(60_000);
+    expect(state.score).toBeLessThan(100_000);
   });
 
   it('survives a long inland journey across Japan while retaining a substantial mountain penalty', () => {
@@ -41,8 +43,8 @@ describe('playability on Japan game geography', () => {
     expect(state.affectedCities).toBeGreaterThanOrEqual(10);
     expect(state.elapsedSeconds).toBeLessThan(15);
     expect(state.elapsedDays).toBeLessThan(9);
-    expect(state.strength).toBeGreaterThan(40);
-    expect(state.strength).toBeLessThan(70);
+    expect(state.strength).toBeGreaterThan(20);
+    expect(state.strength).toBeLessThan(50);
     expect(state.stability).toBeGreaterThan(60);
     expect(state.stability).toBeLessThan(85);
   });
@@ -63,6 +65,17 @@ describe('playability on Japan game geography', () => {
       route.push(...coastalRoute.slice(1), { x: 850, y: 500 }, { x: 600, y: 700 }, START_POINT);
     }
     const state = createSimulation(route);
+    stepSimulation(state, 10);
+    const earlyScore = state.score;
+    const earlyStrength = state.strength;
+    expect(earlyStrength).toBeLessThan(85);
+    stepSimulation(state, 20);
+    const middleScore = state.score;
+    expect(middleScore - earlyScore).toBeGreaterThan(50_000);
+    expect(state.strength).toBeGreaterThan(earlyStrength + 15);
+    stepSimulation(state, 30);
+    expect(state.score - middleScore).toBeGreaterThan(50_000);
+    expect(state.cityDamage.tokyo.visitCount).toBeGreaterThan(1);
     stepSimulation(state, 1_000);
     expect(state.phase).toBe('finished');
     expect(state.endReason).not.toBe('route-complete');
@@ -73,5 +86,29 @@ describe('playability on Japan game geography', () => {
       expect(asset.remaining).toBeGreaterThanOrEqual(0);
       expect(asset.peakExposure).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('can rebuild over the sea after mountain travel and earn substantially again in the late game', () => {
+    const route: Point[] = [...mountainCorridor];
+    for (let loop = 0; loop < 10; loop++) {
+      route.push(
+        project(145, 42), project(144, 34.5), project(139.7, 33), city('tokyo'),
+        { x: 635, y: 419 }, city('nagoya'), { x: 570, y: 432 }, city('osaka'),
+        project(134, 32.5), project(139.7, 33),
+      );
+    }
+    const state = createSimulation(route);
+    stepSimulation(state, 10);
+    const weakenedStrength = state.strength;
+    const weakenedStability = state.stability;
+    expect(weakenedStrength).toBeLessThan(45);
+    stepSimulation(state, 20);
+    const middleScore = state.score;
+    stepSimulation(state, 30);
+    expect(state.phase).toBe('running');
+    expect(state.strength).toBeGreaterThan(weakenedStrength + 40);
+    expect(state.stability).toBeGreaterThan(weakenedStability + 8);
+    expect(state.score - middleScore).toBeGreaterThan(50_000);
+    expect(state.score).toBeLessThanOrEqual(maxAssetScore());
   });
 });

@@ -32,6 +32,11 @@ export interface CityDamage {
   damage: number;
   /** Historical maximum local exposure, from 0 to 1. */
   peakExposure: number;
+  /** A visit ends only after clearing the city's radius plus the configured margin. */
+  activeVisit: boolean;
+  visitPeakExposure: number;
+  visitStartingRemaining: number;
+  visitCount: number;
 }
 
 export interface SimulationEvent {

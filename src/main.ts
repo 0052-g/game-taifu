@@ -12,7 +12,7 @@ const play = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><p
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <header class="site-header">
-    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.1.1</span></a>
+    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.1.2</span></a>
     <div class="header-actions"><span class="personal-best"><span>自己ベスト</span><strong id="best-score">0</strong><small>pt</small></span><button class="help-button" id="help-open" aria-label="遊び方を開く">? <span>遊び方</span></button></div>
   </header>
   <main class="page">
@@ -39,17 +39,17 @@ app.innerHTML = `
       <aside class="control-panel">
         <section class="launch-card"><div class="step-kicker"><span id="step-number">01</span><span id="step-label">まずは、進路を描こう</span></div><h2 id="control-title">そのひと筆が、<br>嵐を起こす。</h2><p id="control-description">海上の台風から線を引こう。<br>海でパワーをためるのがコツ！</p><div class="route-ready" id="route-ready"><span class="ready-dot"></span><span id="route-status">進路の入力待ち</span></div><button class="primary-button" id="start" disabled>${play}<span>台風、出発！</span>${arrow}</button><div class="secondary-controls"><button id="redraw" class="text-button"><span>↺</span> 描き直す</button><button id="sample" class="text-button">おまかせ進路 ${arrow}</button></div><div class="playback" id="playback" hidden><button id="pause" aria-label="シミュレーションを一時停止">Ⅱ 一時停止</button><div class="speeds" aria-label="再生速度"><button data-speed="1" class="selected" aria-pressed="true">×1</button><button data-speed="2" aria-pressed="false">×2</button><button data-speed="4" aria-pressed="false">×4</button></div></div></section>
 
-        <section class="tips-card"><div class="section-label"><span>✦</span> 台風マスターへの道</div><div class="tip"><span class="tip-number">01</span><p><strong>海は、パワースポット。</strong><br>暖かい海で勢力を回復しよう。</p></div><div class="tip"><span class="tip-number">02</span><p><strong>山越えは、体力勝負。</strong><br>構造が崩れると回復にも限界が。</p></div><div class="tip"><span class="tip-number">03</span><p><strong>同じ都市は、おかわり控えめ。</strong><br>残りの資産が少ないほど低得点。</p></div><div class="season-tip">◷ 秋はあっという間。12月にはおしまい！</div></section>
+        <section class="tips-card"><div class="section-label"><span>✦</span> 台風マスターへの道</div><div class="tip"><span class="tip-number">01</span><p><strong>海で、立て直す。</strong><br>勢力・構造を育てて再上陸！</p></div><div class="tip"><span class="tip-number">02</span><p><strong>山越えは、体力勝負。</strong><br>構造が崩れると回復にも限界が。</p></div><div class="tip"><span class="tip-number">03</span><p><strong>再上陸にも、チャンス。</strong><br>残り資産に応じて、少しずつ得点。</p></div><div class="season-tip">◷ 秋はあっという間。12月にはおしまい！</div></section>
 
         <section class="log-card"><div class="section-label"><span class="tiny-pulse"></span> 台風だより<span id="terrain-badge">海の上</span></div><div id="event-log" class="event-log" role="log" aria-live="polite"><p class="empty-log">小さな台風が、冒険を待っています。</p></div></section>
       </aside>
     </div>
 
     <section class="asset-strip" aria-label="主要都市の資産残量"><div class="asset-title"><span>都市の残り資産</span><small>通過すると減少します</small></div><div id="city-assets" class="city-assets"></div></section>
-    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.1.1</b></span></footer>
+    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.1.2</b></span></footer>
   </main>
 
-  <dialog id="help-dialog" class="modal"><button class="modal-close" data-close="help-dialog" aria-label="閉じる">×</button><span class="eyebrow">HOW TO PLAY</span><h2>台風の冒険をつくろう。</h2><ol class="help-steps"><li><b>進路を描く</b><p>海上の台風から、指やマウスで一筆書き。線の交差・同じ場所の再通過もOK。離したら、線の終点から続きを描けます。</p></li><li><b>「台風、出発！」を押す</b><p>暖かい海では回復、陸上や山では衰退。都市に強い勢力で近づくほど、資産への被害スコアが伸びます。</p></li><li><b>記録に挑戦する</b><p>終点への到達、勢力・構造の低下、冬の到来で終了。同じ都市に居続けても加点は増えず、強くなって再訪すると追加の被害が出ることがあります。</p></li></ol><p class="help-footnote">キーボードでも「おまかせ進路」で遊べます。自己ベストはこのブラウザに保存。簡略地図・架空の資産を使ったゲームです。</p><button class="primary-button" data-close="help-dialog">わかった、やってみよう！ ${arrow}</button></dialog>
+  <dialog id="help-dialog" class="modal"><button class="modal-close" data-close="help-dialog" aria-label="閉じる">×</button><span class="eyebrow">HOW TO PLAY</span><h2>台風の冒険をつくろう。</h2><ol class="help-steps"><li><b>進路を描く</b><p>海上の台風から、指やマウスで一筆書き。線の交差・同じ場所の再通過もOK。離したら、線の終点から続きを描けます。</p></li><li><b>「台風、出発！」を押す</b><p>暖かい海では回復、陸上や山では衰退。都市に強い勢力で近づくほど、資産への被害スコアが伸びます。</p></li><li><b>記録に挑戦する</b><p>終点への到達、勢力・構造の低下、冬の到来で終了。海で立て直して再上陸すると、残った資産からまた得点できます。同じ都市に居続けても加点は増えず、残り資産が減るほど、同じ勢力での得点は小さくなります。</p></li></ol><p class="help-footnote">キーボードでも「おまかせ進路」で遊べます。自己ベストはこのブラウザに保存。簡略地図・架空の資産を使ったゲームです。</p><button class="primary-button" data-close="help-dialog">わかった、やってみよう！ ${arrow}</button></dialog>
   <dialog id="result-dialog" class="modal result-modal"><button class="modal-close" data-close="result-dialog" aria-label="結果を閉じて地図を見る">×</button><div class="result-icon">${spiral}</div><span class="eyebrow">STORM REPORT</span><h2 id="result-title">冒険、おつかれさま！</h2><p id="result-reason"></p><div class="result-score"><small>最終被害スコア</small><strong id="result-score">0</strong><span>pt</span><b id="new-best" hidden>NEW BEST!</b></div><div class="result-stats"><div><span>通過した都市</span><strong id="result-cities">0都市</strong></div><div><span>最高勢力</span><strong id="result-strength">0</strong></div><div><span>旅した日数</span><strong id="result-days">0日</strong></div></div><p id="result-tip" class="result-tip"></p><button id="retry" class="primary-button">新しい進路で挑戦 ${arrow}</button><button id="same-route" class="text-button">同じ進路でもう一度 ↻</button></dialog>
 `;
 
@@ -205,7 +205,7 @@ function finish() {
   $('result-cities').textContent = `${state.affectedCities}都市`;
   $('result-strength').textContent = `${Math.round(state.maxStrength)}`;
   $('result-days').textContent = `${Math.floor(state.elapsedDays)}日`;
-  $('result-tip').textContent = state.affectedCities === 0 ? '次は都市の近くまで！暖かい海で勢力をためてから向かおう。' : state.stability < 30 ? '山越えで構造がぐらぐら。次は海沿いのルートを試してみよう。' : '海で育てて、強いまま都市へ。次のひと筆で記録を更新しよう！';
+  $('result-tip').textContent = state.affectedCities === 0 ? '次は都市の近くまで！暖かい海で勢力をためてから向かおう。' : state.stability < 30 ? '山越えで構造がぐらぐら。海で立て直してから、次の都市へ向かおう。' : '海で立て直して、残った資産へ再上陸。次のひと筆で記録を更新しよう！';
   const record = Math.floor(state.score) > best;
   $('new-best').hidden = !record;
   if (record) {
@@ -280,9 +280,18 @@ $('redraw').addEventListener('click', reset);
 $('pause').addEventListener('click', () => setPaused(!paused));
 $('sample').addEventListener('click', () => {
   reset();
-  // Scenic coastal route: sea recovery, then Osaka, Nagoya and Tokyo.
+  // First landfall, a warm-sea recovery loop, then a stronger second landfall.
   const cityPoint = (id: string) => ({ ...CITIES.find(city => city.id === id)!.position });
-  route = [START_POINT, { x: 440, y: 570 }, { x: 445, y: 455 }, cityPoint('osaka'), { x: 570, y: 432 }, cityPoint('nagoya'), { x: 635, y: 419 }, cityPoint('tokyo'), { x: 735, y: 355 }];
+  route = [
+    START_POINT, { x: 440, y: 570 }, { x: 445, y: 455 },
+    cityPoint('osaka'), { x: 570, y: 432 }, cityPoint('nagoya'),
+    { x: 635, y: 419 }, cityPoint('tokyo'),
+    { x: 800, y: 500 }, { x: 700, y: 690 }, { x: 500, y: 700 },
+    { x: 350, y: 610 }, { x: 400, y: 490 },
+    cityPoint('hiroshima'), cityPoint('osaka'),
+    { x: 570, y: 432 }, cityPoint('nagoya'),
+    { x: 635, y: 419 }, cityPoint('tokyo'), { x: 735, y: 355 },
+  ];
   updateRouteInfo();
 });
 document.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach(button => {

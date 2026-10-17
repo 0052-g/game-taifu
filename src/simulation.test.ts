@@ -33,22 +33,23 @@ describe('typhoon lifecycle', () => {
     state.strength = 40;
     state.stability = 50;
     stepSimulation(state, 2);
-    expect(state.strength).toBeGreaterThan(47);
-    expect(state.stability).toBeGreaterThan(50);
-    expect(state.stability).toBeLessThan(51);
+    expect(state.strength).toBeGreaterThan(46);
+    expect(state.stability).toBeGreaterThan(51.8);
+    expect(state.stability).toBeLessThan(52.2);
+    expect(state.strength - 40).toBeGreaterThan((state.stability - 50) * 2.5);
   });
 
   it('mountains weaken both strength and structure more than plains', () => {
     const simulate = (terrain: Terrain) => {
       fixture.terrain = terrain;
       const state = createSimulation(longRoute());
-      stepSimulation(state, 10);
+      stepSimulation(state, 8);
       return state;
     };
     const plain = simulate('land');
     const mountain = simulate('mountain');
     expect(mountain.phase).toBe('running');
-    expect(mountain.strength).toBeGreaterThan(20);
+    expect(mountain.strength).toBeGreaterThan(15);
     expect(mountain.stability).toBeGreaterThan(50);
     expect(mountain.strength).toBeLessThan(plain.strength);
     expect(mountain.stability).toBeLessThan(plain.stability);
@@ -98,7 +99,33 @@ describe('typhoon lifecycle', () => {
 });
 
 describe('finite regional damage', () => {
-  it('scores at most the city asset value across repeat visits and crossings', () => {
+  it('earns a diminishing share of remaining assets on each distinct equal-strength visit', () => {
+    const state = createSimulation([
+      { x: 0, y: 0 }, { x: 320, y: 0 }, { x: 0, y: 0 }, { x: 320, y: 0 },
+      { x: 0, y: 0 }, { x: 320, y: 0 },
+    ]);
+    state.strength = 100;
+    state.stability = 100;
+    stepSimulation(state, 320 / SIMULATION_CONFIG.movementSpeed + 0.02);
+    const firstPassScore = state.score;
+    expect(firstPassScore).toBeCloseTo(50_000, 5);
+    stepSimulation(state, 640 / SIMULATION_CONFIG.movementSpeed);
+    expect(state.score).toBeCloseTo(75_000, 5);
+    stepSimulation(state, 100);
+    expect(state.score).toBeCloseTo(87_500, 5);
+    expect(state.score).toBeLessThanOrEqual(maxAssetScore());
+    expect(state.cityDamage['test-city'].remaining).toBeCloseTo(12_500, 5);
+    expect(state.cityDamage['test-city'].visitCount).toBe(3);
+    expect(state.affectedCities).toBe(1);
+    const events = state.events.filter((event) => event.kind === 'city');
+    expect(events).toHaveLength(3);
+    expect(events[1].text).toContain('再直撃');
+    expect(events[1].score).toBeGreaterThan(0);
+    expect(events[1].score!).toBeLessThan(events[0].score!);
+    expect(events[2].score!).toBeLessThan(events[1].score!);
+  });
+
+  it('a weaker revisit still earns from remaining assets without beating the all-time exposure', () => {
     const state = createSimulation([
       { x: 0, y: 0 }, { x: 320, y: 0 }, { x: 0, y: 0 }, { x: 320, y: 0 },
     ]);
@@ -106,15 +133,43 @@ describe('finite regional damage', () => {
     state.stability = 100;
     stepSimulation(state, 320 / SIMULATION_CONFIG.movementSpeed + 0.02);
     const firstPassScore = state.score;
-    expect(firstPassScore).toBeCloseTo(100_000, 5);
+    state.strength = 30;
     stepSimulation(state, 100);
-    expect(state.score).toBeCloseTo(firstPassScore, 5);
-    expect(state.score).toBeLessThanOrEqual(maxAssetScore());
-    expect(state.cityDamage['test-city'].remaining).toBeCloseTo(0, 5);
-    expect(state.affectedCities).toBe(1);
+    expect(state.score).toBeGreaterThan(firstPassScore);
+    expect(state.score).toBeLessThan(75_000);
+    expect(state.cityDamage['test-city'].peakExposure).toBe(1);
+    expect(state.cityDamage['test-city'].visitPeakExposure).toBeLessThan(0.5);
+    expect(state.cityDamage['test-city'].visitCount).toBe(2);
   });
 
-  it('a stronger revisit adds only the newly damaged share of the city', () => {
+  it('tiny loops and prolonged time inside one visit do not consume another share', () => {
+    const route = [{ x: 0, y: 0 }, { x: 320, y: 0 }];
+    for (let loop = 0; loop < 200; loop++) route.push({ x: 322, y: 0 }, { x: 318, y: 0 });
+    route.push({ x: 320, y: 0 });
+    const state = createSimulation(route);
+    state.strength = 100;
+    state.stability = 100;
+    stepSimulation(state, 320 / SIMULATION_CONFIG.movementSpeed + 0.02);
+    const firstPassScore = state.score;
+    stepSimulation(state, 100);
+    expect(state.score).toBeCloseTo(firstPassScore, 5);
+    expect(state.cityDamage['test-city'].visitCount).toBe(1);
+    expect(state.cityDamage['test-city'].remaining).toBeCloseTo(50_000, 5);
+    expect(state.events.filter((event) => event.kind === 'city')).toHaveLength(1);
+  });
+
+  it('requires a clear exit past the margin rather than boundary flickering to start another visit', () => {
+    const route = [{ x: 0, y: 0 }, { x: 320, y: 0 }];
+    for (let loop = 0; loop < 4; loop++) route.push({ x: 464, y: 0 }, { x: 320, y: 0 });
+    const state = createSimulation(route);
+    state.strength = 100;
+    state.stability = 100;
+    stepSimulation(state, 100);
+    expect(state.cityDamage['test-city'].visitCount).toBe(1);
+    expect(state.score).toBeCloseTo(50_000, 5);
+  });
+
+  it('a stronger revisit increases exposure while retaining all prior damage and finite assets', () => {
     const state = createSimulation([
       { x: 0, y: 0 }, { x: 320, y: 0 }, { x: 0, y: 0 }, { x: 320, y: 0 },
     ]);
@@ -125,7 +180,10 @@ describe('finite regional damage', () => {
     stepSimulation(state, 100);
     expect(state.score).toBeGreaterThan(firstPassScore);
     expect(state.score).toBeLessThanOrEqual(100_000);
-    expect(state.cityDamage['test-city'].damage + state.cityDamage['test-city'].remaining).toBeCloseTo(100_000, 6);
+    const asset = state.cityDamage['test-city'];
+    expect(asset.damage + asset.remaining).toBeCloseTo(100_000, 6);
+    expect(asset.remaining).toBeCloseTo(asset.visitStartingRemaining * (1 - 0.5 * asset.visitPeakExposure), 6);
+    expect(asset.visitCount).toBe(2);
     expect(state.events.filter((event) => event.kind === 'city')).toHaveLength(1);
   });
 });
@@ -146,20 +204,28 @@ describe('route integration', () => {
   it('does not skip a city when a large update spans the entire route', () => {
     const state = createSimulation([{ x: 0, y: 0 }, { x: 640, y: 0 }]);
     stepSimulation(state, 20);
-    expect(state.score).toBeGreaterThan(80_000);
+    expect(state.score).toBeGreaterThan(20_000);
+    expect(state.score).toBeLessThan(50_000);
     expect(state.endReason).toBe('route-complete');
   });
 
   it('is invariant to how the same elapsed time is split into browser frames', () => {
-    const once = createSimulation(longRoute());
-    const frames = createSimulation(longRoute());
-    stepSimulation(once, 10);
-    for (let frame = 0; frame < 600; frame++) stepSimulation(frames, 1 / 60);
+    const route = [
+      { x: 0, y: 0 }, { x: 320, y: 0 }, { x: 0, y: 0 },
+      { x: 320, y: 0 }, { x: 0, y: 0 }, { x: 320, y: 0 },
+    ];
+    const once = createSimulation(route);
+    const frames = createSimulation(route);
+    stepSimulation(once, 20);
+    for (let frame = 0; frame < 1_200; frame++) stepSimulation(frames, 1 / 60);
     expect(frames.position.x).toBeCloseTo(once.position.x, 9);
     expect(frames.strength).toBeCloseTo(once.strength, 9);
     expect(frames.stability).toBeCloseTo(once.stability, 9);
     expect(frames.elapsedDays).toBeCloseTo(once.elapsedDays, 9);
     expect(frames.score).toBeCloseTo(once.score, 9);
+    expect(frames.cityDamage['test-city'].visitCount).toBe(once.cityDamage['test-city'].visitCount);
+    expect(frames.cityDamage['test-city'].visitCount).toBeGreaterThan(1);
+    expect(frames.cityDamage['test-city'].remaining).toBeCloseTo(once.cityDamage['test-city'].remaining, 9);
   });
 
   it('rejects invalid and empty routes and safely ignores invalid frame durations', () => {

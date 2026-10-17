@@ -512,47 +512,126 @@ export class CanvasRenderer {
     ctx.scale(size, size);
     if (phase === 'finished') ctx.globalAlpha = 0.76;
 
+    // Thin wind wisps turn in the same direction as the spiral cloud bands.
     ctx.save();
-    ctx.rotate(-time / (phase === 'running' ? 420 : 1250));
-    ctx.strokeStyle = '#eaa48788';
-    ctx.lineWidth = 2;
+    ctx.rotate(-time / (phase === 'running' ? 700 : 2100));
+    ctx.strokeStyle = '#88afa35e';
+    ctx.lineWidth = 1.4;
     ctx.lineCap = 'round';
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
-      ctx.arc(0, 0, 43 + i * 3, i * 2.1, i * 2.1 + 0.55);
+      ctx.arc(0, 0, 49 + i * 1.2, i * 2.1, i * 2.1 + 0.42);
       ctx.stroke();
     }
     ctx.restore();
 
     ctx.save();
-    ctx.rotate(-time / (phase === 'running' ? 650 : 2000));
-    ctx.shadowColor = '#987b5a3b';
-    ctx.shadowOffsetY = 4;
-    ctx.shadowBlur = 4;
-    const colors = ['#f8a88a', '#ffc1a3', '#f39a83'];
-    for (let i = 0; i < 3; i++) {
+    ctx.rotate(-time / (phase === 'running' ? 1050 : 3100));
+    // A continuous cloud core joins seven swept, tapering plumes. Their long
+    // curved edges and smaller trailing barbs suggest feathered rain bands.
+    ctx.beginPath();
+    ctx.arc(0, 0, 26, 0, Math.PI * 2);
+    ctx.fillStyle = '#dcece7';
+    ctx.shadowColor = '#497c6d30';
+    ctx.shadowOffsetY = 3;
+    ctx.shadowBlur = 5;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+
+    const lengths = [46, 43, 47, 44, 46, 45, 43];
+    for (let i = 0; i < 7; i++) {
       ctx.save();
-      ctx.rotate((i * Math.PI * 2) / 3);
+      ctx.rotate((i * Math.PI * 2) / 7 + Math.sin(i * 1.7) * 0.045);
+      const length = lengths[i];
+      const sweep = 1.3 + (i % 3) * 0.055;
+      const plumePoint = (t: number) => {
+        const radius = 16 + (length - 16) * t;
+        const angle = -sweep * t;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        const dx = (length - 16) * Math.cos(angle) + radius * sweep * Math.sin(angle);
+        const dy = (length - 16) * Math.sin(angle) - radius * sweep * Math.cos(angle);
+        const norm = Math.hypot(dx, dy);
+        const width = 11.8 * Math.pow(1 - t, 0.68) * (0.87 + Math.sin(t * Math.PI) * 0.13);
+        return { x, y, nx: -dy / norm, ny: dx / norm, width };
+      };
+      const plume = new Path2D();
+      for (let side = 0; side < 2; side++) {
+        for (let j = 0; j <= 32; j++) {
+          const t = (side === 0 ? j : 32 - j) / 32;
+          const point = plumePoint(t);
+          const direction = side === 0 ? 1 : -1;
+          // Very small scallops soften the cloud edge without a toothed silhouette.
+          const scallop = 1 + Math.sin(t * Math.PI * 5) * Math.sin(t * Math.PI) * 0.035;
+          const x = point.x + point.nx * point.width * direction * scallop;
+          const y = point.y + point.ny * point.width * direction * scallop;
+          if (side === 0 && j === 0) plume.moveTo(x, y);
+          else plume.lineTo(x, y);
+        }
+      }
+      plume.closePath();
+      ctx.save();
+      ctx.translate(0.6, 1.7);
+      ctx.fillStyle = '#bcd6ce';
+      ctx.fill(plume);
+      ctx.restore();
+      const cloud = ctx.createLinearGradient(-8, -34, 33, 8);
+      cloud.addColorStop(0, '#ffffff');
+      cloud.addColorStop(0.65, '#fcfefa');
+      cloud.addColorStop(1, '#e8f2ee');
+      ctx.fillStyle = cloud;
+      ctx.fill(plume);
+      ctx.strokeStyle = '#8fb2a991';
+      ctx.lineWidth = 0.85;
+      ctx.stroke(plume);
+
+      // A gently curved quill and two secondary wisps follow the same sweep.
       ctx.beginPath();
-      ctx.moveTo(-4, -10);
-      ctx.bezierCurveTo(4, -36, 34, -41, 40, -15);
-      ctx.bezierCurveTo(31, -26, 13, -17, 13, 2);
-      ctx.bezierCurveTo(5, 9, -4, 1, -4, -10);
-      ctx.fillStyle = colors[i];
-      ctx.fill();
-      ctx.strokeStyle = '#9b6755';
-      ctx.lineWidth = 1.8;
+      for (let j = 0; j <= 20; j++) {
+        const p = plumePoint(0.26 + (j / 20) * 0.65);
+        if (j === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = '#bad5ce';
+      ctx.lineWidth = 1.1;
       ctx.stroke();
+      for (const t of [0.34, 0.56]) {
+        const root = plumePoint(t);
+        const middle = plumePoint(t + 0.12);
+        const tip = plumePoint(t + 0.24);
+        ctx.beginPath();
+        ctx.moveTo(root.x, root.y);
+        ctx.quadraticCurveTo(
+          middle.x + middle.nx * middle.width * 0.72,
+          middle.y + middle.ny * middle.width * 0.72,
+          tip.x + tip.nx * tip.width * 0.86,
+          tip.y + tip.ny * tip.width * 0.86,
+        );
+        ctx.strokeStyle = '#b6d1c8b8';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
       ctx.restore();
     }
+    // Soft inner curl connects the plumes into one continuous storm.
+    ctx.beginPath();
+    ctx.arc(0, 0, 23, 0, Math.PI * 2);
+    ctx.fillStyle = '#f6fbf6';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, 23, -0.8, 3.75);
+    ctx.strokeStyle = '#b2cfc5';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
     ctx.restore();
 
+    // Keep the little face upright while its cloud feathers rotate around it.
     ctx.beginPath();
     ctx.arc(0, 0, 18, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff9e9';
+    ctx.fillStyle = '#fffef8';
     ctx.fill();
-    ctx.strokeStyle = '#976953';
-    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = '#8aafa1';
+    ctx.lineWidth = 1.25;
     ctx.stroke();
     ctx.fillStyle = INK;
     if (phase === 'finished') {
@@ -579,10 +658,10 @@ export class CanvasRenderer {
     ctx.beginPath();
     ctx.arc(0, 3, 5, 0.12, Math.PI - 0.12);
     ctx.stroke();
-    ctx.fillStyle = '#f5b39c';
+    ctx.fillStyle = '#efbdab';
     ctx.beginPath();
-    ctx.ellipse(-11, 4, 3, 1.8, 0, 0, Math.PI * 2);
-    ctx.ellipse(11, 4, 3, 1.8, 0, 0, Math.PI * 2);
+    ctx.ellipse(-11, 4, 2.6, 1.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(11, 4, 2.6, 1.6, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
