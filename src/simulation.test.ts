@@ -8,18 +8,26 @@ const fixture = vi.hoisted(() => ({ terrain: 'ocean' as 'ocean' | 'land' | 'moun
 // A tiny synthetic map makes engine rules independent of the hand-drawn Japan data.
 vi.mock('./data/map', () => ({ START_POINT: { x: 0, y: 0 } }));
 vi.mock('./data/cities', () => ({ CITIES: [
-  { id: 'test-city', name: 'テスト市', position: { x: 80, y: 0 }, weight: 100_000, radius: 30 },
+  { id: 'test-city', name: 'テスト市', position: { x: 320, y: 0 }, weight: 100_000, radius: 120 },
 ] }));
 vi.mock('./geo', () => ({
   distance: (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y),
   terrainAt: () => fixture.terrain,
 }));
 
-const longRoute = () => [{ x: 0, y: 0 }, { x: 10_000, y: 0 }];
+const longRoute = () => [{ x: 0, y: 0 }, { x: 100_000, y: 0 }];
 
 beforeEach(() => { fixture.terrain = 'ocean'; });
 
 describe('typhoon lifecycle', () => {
+  it('uses the former four-times travel speed as baseline while the calendar advances more slowly', () => {
+    const state = createSimulation(longRoute());
+    stepSimulation(state, 10);
+    expect(state.traveledDistance).toBeCloseTo(720, 8);
+    expect(state.elapsedDays).toBeCloseTo(6, 8);
+    expect(state.phase).toBe('running');
+  });
+
   it('recovers strength over warm water while structural recovery is slower', () => {
     const state = createSimulation(longRoute());
     state.strength = 40;
@@ -34,11 +42,14 @@ describe('typhoon lifecycle', () => {
     const simulate = (terrain: Terrain) => {
       fixture.terrain = terrain;
       const state = createSimulation(longRoute());
-      stepSimulation(state, 2);
+      stepSimulation(state, 10);
       return state;
     };
     const plain = simulate('land');
     const mountain = simulate('mountain');
+    expect(mountain.phase).toBe('running');
+    expect(mountain.strength).toBeGreaterThan(20);
+    expect(mountain.stability).toBeGreaterThan(50);
     expect(mountain.strength).toBeLessThan(plain.strength);
     expect(mountain.stability).toBeLessThan(plain.stability);
   });
@@ -89,11 +100,11 @@ describe('typhoon lifecycle', () => {
 describe('finite regional damage', () => {
   it('scores at most the city asset value across repeat visits and crossings', () => {
     const state = createSimulation([
-      { x: 0, y: 0 }, { x: 80, y: 0 }, { x: 0, y: 0 }, { x: 80, y: 0 },
+      { x: 0, y: 0 }, { x: 320, y: 0 }, { x: 0, y: 0 }, { x: 320, y: 0 },
     ]);
     state.strength = 100;
     state.stability = 100;
-    stepSimulation(state, 80 / SIMULATION_CONFIG.movementSpeed + 0.02);
+    stepSimulation(state, 320 / SIMULATION_CONFIG.movementSpeed + 0.02);
     const firstPassScore = state.score;
     expect(firstPassScore).toBeCloseTo(100_000, 5);
     stepSimulation(state, 100);
@@ -105,11 +116,11 @@ describe('finite regional damage', () => {
 
   it('a stronger revisit adds only the newly damaged share of the city', () => {
     const state = createSimulation([
-      { x: 0, y: 0 }, { x: 80, y: 0 }, { x: 0, y: 0 }, { x: 80, y: 0 },
+      { x: 0, y: 0 }, { x: 320, y: 0 }, { x: 0, y: 0 }, { x: 320, y: 0 },
     ]);
     state.strength = 25;
     state.stability = 100;
-    stepSimulation(state, 80 / SIMULATION_CONFIG.movementSpeed + 0.02);
+    stepSimulation(state, 320 / SIMULATION_CONFIG.movementSpeed + 0.02);
     const firstPassScore = state.score;
     stepSimulation(state, 100);
     expect(state.score).toBeGreaterThan(firstPassScore);
@@ -133,7 +144,7 @@ describe('route integration', () => {
   });
 
   it('does not skip a city when a large update spans the entire route', () => {
-    const state = createSimulation([{ x: 0, y: 0 }, { x: 160, y: 0 }]);
+    const state = createSimulation([{ x: 0, y: 0 }, { x: 640, y: 0 }]);
     stepSimulation(state, 20);
     expect(state.score).toBeGreaterThan(80_000);
     expect(state.endReason).toBe('route-complete');

@@ -12,7 +12,7 @@ const play = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><p
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <header class="site-header">
-    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.1</span></a>
+    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.1.1</span></a>
     <div class="header-actions"><span class="personal-best"><span>自己ベスト</span><strong id="best-score">0</strong><small>pt</small></span><button class="help-button" id="help-open" aria-label="遊び方を開く">? <span>遊び方</span></button></div>
   </header>
   <main class="page">
@@ -46,7 +46,7 @@ app.innerHTML = `
     </div>
 
     <section class="asset-strip" aria-label="主要都市の資産残量"><div class="asset-title"><span>都市の残り資産</span><small>通過すると減少します</small></div><div id="city-assets" class="city-assets"></div></section>
-    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.1</b></span></footer>
+    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.1.1</b></span></footer>
   </main>
 
   <dialog id="help-dialog" class="modal"><button class="modal-close" data-close="help-dialog" aria-label="閉じる">×</button><span class="eyebrow">HOW TO PLAY</span><h2>台風の冒険をつくろう。</h2><ol class="help-steps"><li><b>進路を描く</b><p>海上の台風から、指やマウスで一筆書き。線の交差・同じ場所の再通過もOK。離したら、線の終点から続きを描けます。</p></li><li><b>「台風、出発！」を押す</b><p>暖かい海では回復、陸上や山では衰退。都市に強い勢力で近づくほど、資産への被害スコアが伸びます。</p></li><li><b>記録に挑戦する</b><p>終点への到達、勢力・構造の低下、冬の到来で終了。同じ都市に居続けても加点は増えず、強くなって再訪すると追加の被害が出ることがあります。</p></li></ol><p class="help-footnote">キーボードでも「おまかせ進路」で遊べます。自己ベストはこのブラウザに保存。簡略地図・架空の資産を使ったゲームです。</p><button class="primary-button" data-close="help-dialog">わかった、やってみよう！ ${arrow}</button></dialog>
