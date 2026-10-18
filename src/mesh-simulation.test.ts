@@ -107,12 +107,33 @@ describe('census-mesh finite assets', () => {
     expect(state.score).toBe(0);
   });
 
+  it('coalesces only changed mesh IDs until the renderer consumes them, then notifies revisits', () => {
+    const route = [{ x: 320, y: 0 }, { x: 326, y: 0 }, { x: 850, y: 0 }];
+    for (let loop = 0; loop < 3; loop++) route.push({ x: 853, y: 0 }, { x: 847, y: 0 });
+    route.push({ x: 850, y: 0 }, { x: 950, y: 0 }, { x: 850, y: 0 });
+    const state = strongStorm(route);
+    expect(state.meshDamageDirtyIds.size).toBe(0);
+    stepSimulation(state, 850 / CONFIG.movementSpeed + 0.02);
+    expect([...state.meshDamageDirtyIds].sort()).toEqual([1, 2, 3]);
+    state.meshDamageDirtyIds.clear();
+    const peakScore = state.score;
+    stepSimulation(state, 0.2);
+    expect(state.score).toBe(peakScore);
+    expect(state.meshDamageDirtyIds.size).toBe(0);
+    stepSimulation(state, 100);
+    expect(state.score).toBeGreaterThan(peakScore);
+    expect([...state.meshDamageDirtyIds]).toEqual([3]);
+  });
+
   it('keeps mesh visits and grouped totals deterministic across browser frame rates', () => {
     const route = [{ x: 320, y: 0 }, { x: 950, y: 0 }, { x: 320, y: 0 }];
     const once = strongStorm(route);
     const frames = strongStorm(route);
     stepSimulation(once, 20);
-    for (let frame = 0; frame < 1_200; frame++) stepSimulation(frames, 1 / 60);
+    for (let frame = 0; frame < 1_200; frame++) {
+      stepSimulation(frames, 1 / 60);
+      frames.meshDamageDirtyIds.clear(); // Rendering notifications cannot alter simulation results.
+    }
     expect(frames.score).toBeCloseTo(once.score, 10);
     expect(frames.meshDamage).toEqual(once.meshDamage);
     expect(frames.cityDamage).toEqual(once.cityDamage);

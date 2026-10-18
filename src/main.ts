@@ -13,7 +13,7 @@ const play = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><p
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <header class="site-header">
-    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.2.0</span></a>
+    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.2.1</span></a>
     <div class="header-actions"><span class="personal-best"><span>自己ベスト</span><strong id="best-score">0</strong><small>pt</small></span><button class="help-button" id="help-open" aria-label="遊び方を開く">? <span>遊び方</span></button></div>
   </header>
   <main class="page">
@@ -49,7 +49,7 @@ app.innerHTML = `
     </div>
 
     <section class="asset-strip" aria-label="主要都市周辺の人口メッシュ資産残量"><div class="asset-title"><span>都市周辺の残り資産</span><small>人口メッシュをゲーム用に換算</small></div><div id="city-assets" class="city-assets"></div></section>
-    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.2.0</b></span></footer>
+    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.2.1</b></span></footer>
   </main>
 
   <dialog id="help-dialog" class="modal"><button class="modal-close" data-close="help-dialog" aria-label="閉じる">×</button><span class="eyebrow">HOW TO PLAY</span><h2>台風の冒険をつくろう。</h2><ol class="help-steps"><li><b>進路を描く</b><p>海上の台風から、指やマウスで一筆書き。線の交差・同じ場所の再通過もOK。離したら、線の終点から続きを描けます。</p></li><li><b>「台風、出発！」を押す</b><p>暖かい海では回復、陸上や山では衰退。人口の多いメッシュに強い勢力で近づくほど得点が伸びます。「人口」表示で人の集まる場所を探そう。</p></li><li><b>記録に挑戦する</b><p>終点への到達、勢力・構造の低下、冬の到来で終了。海で立て直して再上陸すると、残った資産からまた得点できます。同じメッシュに居続けても加点は増えず、残り資産が減るほど、同じ勢力での得点は小さくなります。</p></li></ol><p class="help-footnote">キーボードでも「おまかせ進路」で遊べます。人口メッシュ版の自己ベストをこのブラウザに保存。人口・標高は実データ、資産・被害スコアはゲーム用の換算値です。</p><button class="primary-button" data-close="help-dialog">わかった、やってみよう！ ${arrow}</button></dialog>
@@ -58,6 +58,11 @@ app.innerHTML = `
 `;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+// Updating unchanged text still invalidates browser layout, even when paused.
+function textIfChanged(id: string, text: string): void {
+  const element = $(id);
+  if (element.textContent !== text) element.textContent = text;
+}
 const canvas = $<HTMLCanvasElement>('game-canvas');
 const renderer = new CanvasRenderer(canvas);
 let route: Point[] = [{ ...START_POINT }];
@@ -99,20 +104,20 @@ function updateRouteInfo() {
 function updateHUD() {
   const s = state ?? initial;
   const date = dateFromElapsedDays(s.elapsedDays);
-  $('date').textContent = `${date.getUTCMonth() + 1}月${date.getUTCDate()}日`;
-  $('season').textContent = s.elapsedDays >= 91 ? '冬の到来' : s.elapsedDays >= 61 ? '冷たい秋の海' : s.elapsedDays >= 30 ? '秋が深まる海' : 'まだまだ夏の海';
+  textIfChanged('date', `${date.getUTCMonth() + 1}月${date.getUTCDate()}日`);
+  textIfChanged('season', s.elapsedDays >= 91 ? '冬の到来' : s.elapsedDays >= 61 ? '冷たい秋の海' : s.elapsedDays >= 30 ? '秋が深まる海' : 'まだまだ夏の海');
   $('season').classList.toggle('cold', s.elapsedDays >= 61);
-  $('strength').textContent = String(Math.round(s.strength));
-  $('stability').textContent = String(Math.round(s.stability));
+  textIfChanged('strength', String(Math.round(s.strength)));
+  textIfChanged('stability', String(Math.round(s.stability)));
   $('strength-bar').style.width = `${s.strength}%`;
   $('stability-bar').style.width = `${s.stability}%`;
-  $('strength-label').textContent = s.strength > 75 ? '絶好調！' : s.strength > 45 ? '元気いっぱい' : s.strength > 20 ? 'おつかれ気味' : 'もう限界…';
-  $('stability-label').textContent = s.stability > 65 ? 'しっかり' : s.stability > 35 ? 'ぐらぐら' : 'くずれそう';
-  $('score').textContent = format(s.score);
-  $('terrain-badge').textContent = { ocean: '海の上', land: '上陸中', mountain: '山越え中' }[s.terrain];
+  textIfChanged('strength-label', s.strength > 75 ? '絶好調！' : s.strength > 45 ? '元気いっぱい' : s.strength > 20 ? 'おつかれ気味' : 'もう限界…');
+  textIfChanged('stability-label', s.stability > 65 ? 'しっかり' : s.stability > 35 ? 'ぐらぐら' : 'くずれそう');
+  textIfChanged('score', format(s.score));
+  textIfChanged('terrain-badge', { ocean: '海の上', land: '上陸中', mountain: '山越え中' }[s.terrain]);
   const currentMesh = meshAt(s.position);
-  $('mesh-population').textContent = format(currentMesh?.population ?? 0);
-  $('mesh-elevation').textContent = currentMesh?.elevationM != null ? `${Math.round(currentMesh.elevationM).toLocaleString('ja-JP')} m` : currentMesh ? '未収録' : '海上';
+  textIfChanged('mesh-population', format(currentMesh?.population ?? 0));
+  textIfChanged('mesh-elevation', currentMesh?.elevationM != null ? `${Math.round(currentMesh.elevationM).toLocaleString('ja-JP')} m` : currentMesh ? '未収録' : '海上');
   $('mesh-population').parentElement!.title = `${POPULATION_YEAR}年国勢調査・現在の約5kmメッシュの人口総数`;
   $('mesh-elevation').parentElement!.title = '現在の約5kmメッシュの平均標高。点の標高ではありません';
   for (const city of CITIES) {
@@ -121,8 +126,12 @@ function updateHUD() {
     const bar = document.getElementById(`asset-${city.id}`);
     if (bar) {
       bar.style.width = `${percent}%`;
-      bar.parentElement!.parentElement!.setAttribute('title', `${city.name}周辺：残り ${Math.round(percent)}%`);
-      bar.parentElement!.parentElement!.setAttribute('aria-label', `${city.name}周辺 残り資産 ${Math.round(percent)}%`);
+      const item = bar.parentElement!.parentElement!;
+      const title = `${city.name}周辺：残り ${Math.round(percent)}%`;
+      if (item.title !== title) {
+        item.title = title;
+        item.setAttribute('aria-label', `${city.name}周辺 残り資産 ${Math.round(percent)}%`);
+      }
     }
   }
   if (state && state.events.length && state.events.at(-1)!.id !== lastEvent) {

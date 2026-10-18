@@ -1,6 +1,6 @@
 import { LANDMASSES, MAP_HEIGHT, MAP_WIDTH, START_POINT } from './data/map';
 import { CITIES } from './data/cities';
-import { MESH_CELLS, POPULATION_CELLS, meshCellBounds } from './data/mesh';
+import { MESH_CELLS, MESH_GRID, POPULATION_CELLS, meshCellBounds } from './data/mesh';
 import { SIMULATION_CONFIG } from './config';
 import type { Point, SimulationState } from './types';
 
@@ -36,10 +36,20 @@ export class CanvasRenderer {
   private readonly visibleMesh: VisibleMesh[] = [];
   private readonly populationBounds = new Map<number, MeshBounds>();
   private readonly damageOverlay = document.createElement('canvas');
+  private readonly landMask = document.createElement('canvas');
+  private readonly cloudSprite = document.createElement('canvas');
+  private readonly cityBaseCache = document.createElement('canvas');
+  private readonly cityLabelCache = document.createElement('canvas');
+  private cityGeometryKey = '';
+  private cityMarkerMask = -1;
+  private cityTiles: { x: number; y: number; sourceX: number; size: number }[] = [];
+  private readonly backgroundReady = new Set<MapLayer>();
+  private cacheRatio = 0;
+  private damageNeedsRebuild = true;
+  private hasDamagePixels = false;
   private readonly damageCtx: CanvasRenderingContext2D;
   private layer: MapLayer = 'terrain';
   private lastDamagePaint = -Infinity;
-  private lastDamageScore = -1;
   private cssWidth = MAP_WIDTH;
   private cssHeight = MAP_HEIGHT;
   private scale = 1;
@@ -63,35 +73,61 @@ export class CanvasRenderer {
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   constructor(private readonly canvas: HTMLCanvasElement) {
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('このブラウザでは Canvas 2D を利用できません。');
     this.ctx = context;
     this.backgrounds = { terrain: document.createElement('canvas'), population: document.createElement('canvas') };
-    this.prepareMapGeometry();
-    this.buildBackground('terrain');
-    this.buildBackground('population');
-    this.damageOverlay.width = MAP_WIDTH * 2;
-    this.damageOverlay.height = MAP_HEIGHT * 2;
     this.damageCtx = this.damageOverlay.getContext('2d')!;
-    this.damageCtx.scale(2, 2);
+    this.prepareMapGeometry();
+    this.buildCloudSprite();
     this.resize();
   }
 
   setLayer(layer: MapLayer): void {
     this.layer = layer;
+    if (!this.backgroundReady.has(layer)) this.buildBackground(layer);
   }
 
   resize(): void {
     const bounds = this.canvas.getBoundingClientRect();
     this.cssWidth = Math.max(1, bounds.width);
     this.cssHeight = Math.max(1, bounds.height);
-    this.dpr = Math.min(window.devicePixelRatio || 1, 3);
-    this.canvas.width = Math.round(this.cssWidth * this.dpr);
-    this.canvas.height = Math.round(this.cssHeight * this.dpr);
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pixelWidth = Math.round(this.cssWidth * this.dpr);
+    const pixelHeight = Math.round(this.cssHeight * this.dpr);
+    if (this.canvas.width !== pixelWidth || this.canvas.height !== pixelHeight) {
+      this.canvas.width = pixelWidth;
+      this.canvas.height = pixelHeight;
+    }
     this.scale = Math.min(this.cssWidth / MAP_WIDTH, this.cssHeight / MAP_HEIGHT);
     this.offsetX = (this.cssWidth - MAP_WIDTH * this.scale) / 2;
     this.offsetY = (this.cssHeight - MAP_HEIGHT * this.scale) / 2;
     this.placeCityLabels();
+    const cityGeometryKey = `${pixelWidth},${pixelHeight},${this.scale},${this.offsetX},${this.offsetY},${this.dpr}`;
+    if (cityGeometryKey !== this.cityGeometryKey) {
+      this.cityGeometryKey = cityGeometryKey;
+      this.buildCityCaches(Math.max(0, this.cityMarkerMask));
+    }
+    const ratio = Math.min(2, Math.max(0.5, this.scale * this.dpr));
+    const cacheWidth = Math.round(MAP_WIDTH * ratio);
+    const cacheHeight = Math.round(MAP_HEIGHT * ratio);
+    if (this.landMask.width !== cacheWidth || this.landMask.height !== cacheHeight || this.cacheRatio === 0) {
+      this.cacheRatio = ratio;
+      this.backgroundReady.clear();
+      for (const layer of ['terrain', 'population'] as const) {
+        if (layer !== this.layer) this.backgrounds[layer].width = this.backgrounds[layer].height = 1;
+      }
+      this.buildBackground(this.layer);
+      this.landMask.width = this.damageOverlay.width = cacheWidth;
+      this.landMask.height = this.damageOverlay.height = cacheHeight;
+      const mask = this.landMask.getContext('2d')!;
+      mask.setTransform(cacheWidth / MAP_WIDTH, 0, 0, cacheHeight / MAP_HEIGHT, 0, 0);
+      mask.fillStyle = '#fff';
+      mask.fill(this.landPath, 'evenodd');
+      this.damageNeedsRebuild = true;
+      this.hasDamagePixels = false;
+      this.lastDamagePaint = -Infinity;
+    }
   }
 
   screenToWorld(clientX: number, clientY: number): Point {
@@ -111,14 +147,14 @@ export class CanvasRenderer {
       this.traveledRoute = null;
       this.traveledSegment = -1;
       this.lastElapsedDays = -1;
-      this.damageCtx.clearRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+      this.damageCtx.clearRect(0, 0, this.damageOverlay.width, this.damageOverlay.height);
       this.lastDamagePaint = -Infinity;
-      this.lastDamageScore = -1;
+      this.damageNeedsRebuild = true;
+      this.hasDamagePixels = false;
     }
     const motionFrame = this.reducedMotion.matches ? { ...frame, time: 0 } : frame;
     const { ctx } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
     ctx.fillStyle = '#e7f3ef';
     ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
     ctx.translate(this.offsetX, this.offsetY);
@@ -160,12 +196,12 @@ export class CanvasRenderer {
   }
 
   private buildBackground(layer: MapLayer): void {
-    // Rasterize each layer once at 2× resolution; the animation only blits a cache.
+    // Match the displayed pixels, capped at DPR 2. Population is built on demand.
     const background = this.backgrounds[layer];
-    background.width = MAP_WIDTH * 2;
-    background.height = MAP_HEIGHT * 2;
+    background.width = Math.round(MAP_WIDTH * this.cacheRatio);
+    background.height = Math.round(MAP_HEIGHT * this.cacheRatio);
     const ctx = background.getContext('2d')!;
-    ctx.scale(2, 2);
+    ctx.setTransform(background.width / MAP_WIDTH, 0, 0, background.height / MAP_HEIGHT, 0, 0);
     ctx.fillStyle = '#e4f3ef';
     ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
     const warm = ctx.createRadialGradient(200, 800, 30, 220, 750, 600);
@@ -269,32 +305,69 @@ export class CanvasRenderer {
     ctx.fillStyle = '#9aab85';
     ctx.fillText('あたたかい海でパワーチャージ', 204, 585);
     this.drawCompass(ctx);
+    this.backgroundReady.add(layer);
   }
 
   private drawMeshDamage(frame: RenderFrame): void {
     const state = frame.state;
     if (!state) return;
-    if (state.score !== this.lastDamageScore && (frame.phase === 'finished' || frame.time - this.lastDamagePaint >= 180)) {
-      const ctx = this.damageCtx;
-      ctx.clearRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
-      ctx.save();
-      ctx.clip(this.landPath, 'evenodd');
-      // meshDamage is lazy and sparse. Repaint reached cells at most ~5 Hz;
-      // never walk the full national mesh dataset in the animation loop.
-      for (const [id, damage] of Object.entries(state.meshDamage)) {
-        if (damage.damage <= 0) continue;
-        const bounds = this.populationBounds.get(Number(id));
+    const rebuild = this.damageNeedsRebuild;
+    if (rebuild || (state.meshDamageDirtyIds.size > 0 && (frame.phase === 'finished' || frame.time - this.lastDamagePaint >= 180))) {
+      const ids: Iterable<number> = rebuild ? Object.keys(state.meshDamage).map(Number) : state.meshDamageDirtyIds;
+      let minIx = Infinity, minIy = Infinity, maxIx = -Infinity, maxIy = -Infinity;
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+      const sx = this.damageOverlay.width / MAP_WIDTH;
+      const sy = this.damageOverlay.height / MAP_HEIGHT;
+      for (const id of ids) {
+        const bounds = this.populationBounds.get(id);
         if (!bounds) continue;
-        const total = damage.remaining + damage.damage;
-        const fraction = total > 0 ? Math.min(1, damage.damage / total) : 0;
-        ctx.fillStyle = `rgba(188, 74, 53, ${0.12 + fraction * 0.52})`;
-        ctx.fillRect(bounds.x, bounds.y, bounds.width + 0.12, bounds.height + 0.12);
+        const ix = id % MESH_GRID.width;
+        const iy = Math.floor(id / MESH_GRID.width);
+        minIx = Math.min(minIx, ix); maxIx = Math.max(maxIx, ix);
+        minIy = Math.min(minIy, iy); maxIy = Math.max(maxIy, iy);
+        left = Math.min(left, Math.round(bounds.x * sx));
+        right = Math.max(right, Math.round((bounds.x + bounds.width) * sx));
+        top = Math.min(top, Math.round(bounds.y * sy));
+        bottom = Math.max(bottom, Math.round((bounds.y + bounds.height) * sy));
       }
-      ctx.restore();
-      this.lastDamageScore = state.score;
+      const ctx = this.damageCtx;
+      if (rebuild) ctx.clearRect(0, 0, this.damageOverlay.width, this.damageOverlay.height);
+      if (minIx !== Infinity) {
+        // Snap shared mesh edges to the same pixel. Repaint the complete dirty
+        // rectangle, including unchanged neighbors, before applying coast alpha
+        // exactly once. This prevents seams and repeatedly fading coastal pixels.
+        ctx.clearRect(left, top, right - left, bottom - top);
+        for (let iy = minIy; iy <= maxIy; iy++) {
+          for (let ix = minIx; ix <= maxIx; ix++) {
+            const id = iy * MESH_GRID.width + ix;
+            const damage = state.meshDamage[id];
+            if (!damage || damage.damage <= 0) continue;
+            const bounds = this.populationBounds.get(id);
+            if (!bounds) continue;
+            const x = Math.round(bounds.x * sx);
+            const y = Math.round(bounds.y * sy);
+            const width = Math.round((bounds.x + bounds.width) * sx) - x;
+            const height = Math.round((bounds.y + bounds.height) * sy) - y;
+            const total = damage.remaining + damage.damage;
+            const fraction = total > 0 ? Math.min(1, damage.damage / total) : 0;
+            ctx.fillStyle = `rgba(188, 74, 53, ${0.12 + fraction * 0.52})`;
+            ctx.fillRect(x, y, width, height);
+            this.hasDamagePixels = true;
+          }
+        }
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(left, top, right - left, bottom - top);
+        ctx.clip();
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(this.landMask, 0, 0);
+        ctx.restore();
+      }
+      state.meshDamageDirtyIds.clear();
+      this.damageNeedsRebuild = false;
       this.lastDamagePaint = frame.time;
     }
-    this.ctx.drawImage(this.damageOverlay, 0, 0, MAP_WIDTH, MAP_HEIGHT);
+    if (this.hasDamagePixels) this.ctx.drawImage(this.damageOverlay, 0, 0, MAP_WIDTH, MAP_HEIGHT);
   }
 
   private drawCompass(ctx: CanvasRenderingContext2D): void {
@@ -407,33 +480,41 @@ export class CanvasRenderer {
     this.labels = labels;
   }
 
-  private drawCities(state: SimulationState | null): void {
-    const ctx = this.ctx;
-    for (const city of CITIES) {
-      const { x, y } = city.position;
-      const asset = state?.cityDamage[city.id];
-      const damaged = asset ? Math.min(1, asset.damage / (asset.remaining + asset.damage || 1)) : 0;
-      const markerSize = 5 + Math.sqrt(city.weight / this.maxCityWeight) * 3;
-      ctx.save();
-      ctx.translate(x, y);
+  private buildCityCaches(markerMask: number, includeLabels = true): void {
+    const configure = (canvas: HTMLCanvasElement): CanvasRenderingContext2D => {
+      canvas.width = this.canvas.width;
+      canvas.height = this.canvas.height;
+      const ctx = canvas.getContext('2d')!;
+      // Align cached text and markers to the same device pixels as direct paint.
+      ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, this.dpr * this.offsetX, this.dpr * this.offsetY);
+      return ctx;
+    };
+    const pixelScale = this.dpr * this.scale;
+    const tileSize = Math.ceil(36 * pixelScale) + 2;
+    this.cityBaseCache.width = tileSize * CITIES.length;
+    this.cityBaseCache.height = tileSize * 2;
+    let ctx = this.cityBaseCache.getContext('2d')!;
+    this.cityTiles = [];
+    for (const [index, city] of CITIES.entries()) {
+      const x = Math.floor(this.dpr * this.offsetX + (city.position.x - 18) * pixelScale);
+      const y = Math.floor(this.dpr * this.offsetY + (city.position.y - 18) * pixelScale);
+      const sourceX = index * tileSize;
+      this.cityTiles.push({ x, y, sourceX, size: tileSize });
+      const position = (row: number) => ctx.setTransform(pixelScale, 0, 0, pixelScale, sourceX - x + this.dpr * this.offsetX + city.position.x * pixelScale, row * tileSize - y + this.dpr * this.offsetY + city.position.y * pixelScale);
+      position(0);
       ctx.fillStyle = '#789e8875';
       ctx.fillRect(-15, -7, 6, 5);
       ctx.fillRect(-9, -14, 5, 7);
       ctx.fillRect(8, 3, 6, 7);
-      if (damaged > 0.01) {
-        ctx.beginPath();
-        ctx.arc(0, 0, 16 + damaged * 5, -Math.PI / 2, -Math.PI / 2 + damaged * Math.PI * 2);
-        ctx.strokeStyle = '#e8987080';
-        ctx.lineWidth = 5;
-        ctx.stroke();
-      }
+      position(1);
+      const markerSize = 5 + Math.sqrt(city.weight / this.maxCityWeight) * 3;
       ctx.beginPath();
       ctx.arc(0, 0, markerSize + 2.5, 0, Math.PI * 2);
       ctx.fillStyle = '#fffdf4';
       ctx.fill();
       ctx.beginPath();
       ctx.arc(0, 0, markerSize, 0, Math.PI * 2);
-      ctx.fillStyle = damaged > 0.8 ? '#c49b7b' : CORAL;
+      ctx.fillStyle = (markerMask & (1 << index)) !== 0 ? '#c49b7b' : CORAL;
       ctx.fill();
       ctx.strokeStyle = '#bd6655';
       ctx.lineWidth = 1;
@@ -442,8 +523,10 @@ export class CanvasRenderer {
       ctx.arc(-1.5, -1.5, 1.7, 0, Math.PI * 2);
       ctx.fillStyle = '#ffd6b6';
       ctx.fill();
-      ctx.restore();
     }
+    this.cityMarkerMask = markerMask;
+    if (!includeLabels) return;
+    ctx = configure(this.cityLabelCache);
     ctx.save();
     ctx.font = `700 ${this.cityFontSize}px ${FONT}`;
     ctx.textBaseline = 'middle';
@@ -467,6 +550,37 @@ export class CanvasRenderer {
       ctx.fillStyle = INK;
       ctx.fillText(city.name, label.x, label.y);
     }
+    ctx.restore();
+  }
+
+  private drawCities(state: SimulationState | null): void {
+    let markerMask = 0;
+    const damaged = CITIES.map((city, index) => {
+      const asset = state?.cityDamage[city.id];
+      const fraction = asset ? Math.min(1, asset.damage / (asset.remaining + asset.damage || 1)) : 0;
+      if (fraction > 0.8) markerMask |= 1 << index;
+      return fraction;
+    });
+    if (markerMask !== this.cityMarkerMask) this.buildCityCaches(markerMask, false);
+    const ctx = this.ctx;
+    const pixelScale = this.dpr * this.scale;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (let i = 0; i < CITIES.length; i++) {
+      const tile = this.cityTiles[i];
+      const { sourceX, size, x, y } = tile;
+      ctx.drawImage(this.cityBaseCache, sourceX, 0, size, size, x, y, size, size);
+      if (damaged[i] > 0.01) {
+        const center = CITIES[i].position;
+        ctx.beginPath();
+        ctx.arc(this.dpr * this.offsetX + center.x * pixelScale, this.dpr * this.offsetY + center.y * pixelScale, (16 + damaged[i] * 5) * pixelScale, -Math.PI / 2, -Math.PI / 2 + damaged[i] * Math.PI * 2);
+        ctx.strokeStyle = '#e8987080';
+        ctx.lineWidth = 5 * pixelScale;
+        ctx.stroke();
+      }
+      ctx.drawImage(this.cityBaseCache, sourceX, size, size, size, x, y, size, size);
+    }
+    ctx.drawImage(this.cityLabelCache, 0, 0);
     ctx.restore();
   }
 
@@ -574,29 +688,11 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  private drawTyphoon(position: Point, strength: number, time: number, phase: RenderFrame['phase']): void {
-    const ctx = this.ctx;
-    const size = (0.77 + Math.max(0, strength) / 275) * Math.max(1, 0.52 / this.scale);
+  private buildCloudSprite(): void {
+    this.cloudSprite.width = this.cloudSprite.height = 336;
+    const ctx = this.cloudSprite.getContext('2d')!;
+    ctx.setTransform(3, 0, 0, 3, 168, 168);
     ctx.save();
-    ctx.translate(position.x, position.y + Math.sin(time / 250) * 1.4);
-    ctx.scale(size, size);
-    if (phase === 'finished') ctx.globalAlpha = 0.76;
-
-    // Thin wind wisps turn in the same direction as the spiral cloud bands.
-    ctx.save();
-    ctx.rotate(-time / (phase === 'running' ? 700 : 2100));
-    ctx.strokeStyle = '#88afa35e';
-    ctx.lineWidth = 1.4;
-    ctx.lineCap = 'round';
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.arc(0, 0, 49 + i * 1.2, i * 2.1, i * 2.1 + 0.42);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.rotate(-time / (phase === 'running' ? 1050 : 3100));
     // A continuous cloud core joins seven swept, tapering plumes. Their long
     // curved edges and smaller trailing barbs suggest feathered rain bands.
     ctx.beginPath();
@@ -693,6 +789,33 @@ export class CanvasRenderer {
     ctx.strokeStyle = '#b2cfc5';
     ctx.lineWidth = 1.2;
     ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawTyphoon(position: Point, strength: number, time: number, phase: RenderFrame['phase']): void {
+    const ctx = this.ctx;
+    const size = (0.77 + Math.max(0, strength) / 275) * Math.max(1, 0.52 / this.scale);
+    ctx.save();
+    ctx.translate(position.x, position.y + Math.sin(time / 250) * 1.4);
+    ctx.scale(size, size);
+    if (phase === 'finished') ctx.globalAlpha = 0.76;
+
+    // Thin wind wisps turn in the same direction as the spiral cloud bands.
+    ctx.save();
+    ctx.rotate(-time / (phase === 'running' ? 700 : 2100));
+    ctx.strokeStyle = '#88afa35e';
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, 49 + i * 1.2, i * 2.1, i * 2.1 + 0.42);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.rotate(-time / (phase === 'running' ? 1050 : 3100));
+    ctx.drawImage(this.cloudSprite, -56, -56, 112, 112);
     ctx.restore();
 
     // Keep the little face upright while its cloud feathers rotate around it.

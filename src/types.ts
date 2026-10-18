@@ -61,6 +61,8 @@ export interface SimulationState {
   cityDamage: Record<string, CityDamage>;
   /** Canonical finite assets, allocated lazily only for population cells reached by the storm. */
   meshDamage: Record<number, CityDamage>;
+  /** Changed assets since the single canvas renderer last consumed them. */
+  meshDamageDirtyIds: Set<number>;
   activeMeshIds: Set<number>;
   traveledDistance: number;
   maxStrength: number;

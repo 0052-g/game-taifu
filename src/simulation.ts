@@ -69,6 +69,7 @@ export function createSimulation(route: Point[]): SimulationState {
     score: 0,
     cityDamage,
     meshDamage: {},
+    meshDamageDirtyIds: new Set(),
     activeMeshIds: new Set(),
     traveledDistance: 0,
     maxStrength: CONFIG.initialStrength,
@@ -157,6 +158,7 @@ function updateDamage(state: SimulationState): void {
     asset.remaining = remaining;
     asset.damage = weight - remaining;
     if (increment <= 0) continue;
+    state.meshDamageDirtyIds.add(cell.id);
     state.score += increment;
     const group = state.cityDamage[cell.reportingCityId];
     if (group.damage === 0) state.affectedCities++;
