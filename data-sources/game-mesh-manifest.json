@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "generator": "scripts/build-game-mesh.py",
+  "command": "python3 scripts/build-game-mesh.py",
+  "grid": {
+    "west": 122,
+    "south": 20,
+    "lonStep": 0.0625,
+    "latStep": 0.041666666666666664,
+    "width": 512,
+    "height": 648,
+    "maskSize": 16
+  },
+  "populationManifest": "data-sources/population-manifest.json",
+  "elevationManifest": "data-sources/elevation-manifest.json",
+  "inputs": {
+    "populationCsvSha256": "601f43c2bd93c3b6ba61a87be41315b0362fa9d2033e0096e2b8d7cc03dd0d43",
+    "terrainCsvSha256": "7a677db8bc8befe885ce7c961601fb9b0cc21ad470a62701ee93c2b88229fcda",
+    "coastlineFeatureSha256": "41d5d17ae7b8d1848502481f327eabcb92492602eecda7d039b8c8fab4b20a83"
+  },
+  "coastline": {
+    "dataset": "Natural Earth 1:10m Admin 0 Countries",
+    "version": "5.1.2",
+    "countryFilter": "ADM0_A3 = 'JPN'",
+    "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson",
+    "sha256": "239eec57ac17f100a11e2536cffc56752c318b50ae765b0918ff7aab4ce8f255",
+    "license": "Public domain",
+    "licenseUrl": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "processing": "Retain the Japan geometry including interior rings; round geographic coordinates to 6 decimal places; strip all source properties."
+  },
+  "landMask": {
+    "size": 16,
+    "bytesPerCell": 32,
+    "encoding": "Base64; row0 is south, column0 is west; each row is 2 bytes, little-endian bits, x0 in least-significant bit.",
+    "sampling": "Natural Earth polygon contains test at the centres of 16x16 subcells; holes are preserved.",
+    "landFraction": "Rounded permille of actual polygon intersection area from the terrain CSV; mask fraction if unavailable."
+  },
+  "demQualityCodes": {
+    "0": "Available sampled DEM including genuine zero and negative pixel values.",
+    "1": "All sampled DEM pixels were zero: ambiguous source fill; heights are null and coverage is 0.",
+    "2": "Missing DEM or no land pixel centre samples: heights are null and coverage is 0.",
+    "3": "Census population exists outside the generalized Natural Earth coastline: preserve population; heights are null and coverage is 0."
+  },
+  "demCoverage": "Available land source-pixel centres divided by expected land source-pixel centres at zoom9, rounded to permille. Ambiguous or missing cells have 0 coverage.",
+  "missingValuePolicy": "Never replace unavailable elevation with zero. Omit nonzero DEM outside Japan coastline unless needed to preserve census population.",
+  "outputs": {
+    "src/data/japan-mesh.json": {
+      "bytes": 1488916,
+      "gzipBytes": 262188,
+      "sha256": "04510cbb8d7f3230c0c4c100731eed94f13e188bd8e49ddf455c66fe2101de5d"
+    },
+    "src/data/coastline.json": {
+      "bytes": 158928,
+      "gzipBytes": 57264,
+      "sha256": "f0fba88c30972b4227820589ebbd10cb528ca049ff74b93b9daca85988721d55"
+    }
+  },
+  "statistics": {
+    "cellCount": 16714,
+    "landCells": 16480,
+    "populationCells": 13799,
+    "populationOnlyCells": 234,
+    "populationOutsideCoast": 88062,
+    "discardedOutsideCoastTerrainCells": 793,
+    "nationalPopulation": 126146099,
+    "qualityCounts": {
+      "0": 16306,
+      "1": 93,
+      "2": 81,
+      "3": 234
+    },
+    "ambiguousAllZeroCells": 93,
+    "availableDemSamples": 6414010,
+    "expectedDemLandSamples": 6414010,
+    "partialCoverageCells": 0,
+    "meanElevationRange": [
+      -3.5,
+      2625.8
+    ],
+    "maximumPixelElevationM": 3705.5,
+    "dependencies": {
+      "numpy": "2.3.5",
+      "shapely": "2.1.2"
+    }
+  }
+}

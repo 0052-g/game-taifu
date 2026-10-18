@@ -9,7 +9,7 @@ export interface City {
   id: string;
   name: string;
   position: Point;
-  /** Fictional asset value; replace the data provider to use real statistics. */
+  /** Sum of census-mesh population score assigned to this display group. */
   weight: number;
   radius: number;
 }
@@ -18,6 +18,7 @@ export interface Landmass {
   id: string;
   name: string;
   points: Point[];
+  holes?: Point[][];
 }
 
 export interface MountainZone {
@@ -32,11 +33,12 @@ export interface CityDamage {
   damage: number;
   /** Historical maximum local exposure, from 0 to 1. */
   peakExposure: number;
-  /** A visit ends only after clearing the city's radius plus the configured margin. */
+  /** A visit ends only after clearing its influence radius plus the configured margin. */
   activeVisit: boolean;
   visitPeakExposure: number;
   visitStartingRemaining: number;
   visitCount: number;
+  visitEventEmitted: boolean;
 }
 
 export interface SimulationEvent {
@@ -55,7 +57,11 @@ export interface SimulationState {
   elapsedDays: number;
   elapsedSeconds: number;
   score: number;
+  /** Display-only aggregation by the nearest named city; groups are not municipal borders. */
   cityDamage: Record<string, CityDamage>;
+  /** Canonical finite assets, allocated lazily only for population cells reached by the storm. */
+  meshDamage: Record<number, CityDamage>;
+  activeMeshIds: Set<number>;
   traveledDistance: number;
   maxStrength: number;
   terrain: Terrain;

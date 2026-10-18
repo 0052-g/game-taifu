@@ -1,4 +1,6 @@
-import { LANDMASSES, MOUNTAIN_ZONES, toMapPoint } from './data/map';
+import { toMapPoint } from './data/map';
+import { isLandAt, meshAt } from './data/mesh';
+import { SIMULATION_CONFIG } from './config';
 import type { Point, Terrain } from './types';
 
 export const project = toMapPoint;
@@ -27,8 +29,12 @@ export function pointInPolygon(point: Point, polygon: readonly Point[]): boolean
   return inside;
 }
 
+/** Real coastal mask and aggregated GSI elevation; missing elevations stay unknown. */
 export function terrainAt(point: Point): Terrain {
-  if (!LANDMASSES.some((land) => pointInPolygon(point, land.points))) return 'ocean';
-  return MOUNTAIN_ZONES.some((zone) => pointInPolygon(point, zone.points))
+  if (!isLandAt(point)) return 'ocean';
+  const cell = meshAt(point);
+  if (!cell) return 'land';
+  return (cell.elevationM !== null && cell.elevationM >= SIMULATION_CONFIG.terrainMountainElevationM)
+    || (cell.reliefM !== null && cell.reliefM >= SIMULATION_CONFIG.terrainMountainReliefM)
     ? 'mountain' : 'land';
 }

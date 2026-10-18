@@ -21,29 +21,15 @@ export const SIMULATION_CONFIG = {
   stabilityCapFactor: 0.85,
   lifetimeCapacityLossPerDay: 0.28,
   cityExposureExponent: 2,
-  cityPassDamageFraction: 0.5,
-  cityVisitExitMargin: 0.35,
+  // Census population is converted to a game score, never a monetary loss estimate.
+  meshAssetPointsPerPerson: 0.005,
+  meshWindRadius: 22,
+  meshPassDamageFraction: 0.5,
+  meshVisitExitMargin: 0.35,
+  terrainMountainElevationM: 500,
+  terrainMountainReliefM: 300,
   cityEventExposure: 0.25,
   maxEvents: 8,
 } as const;
 
 export const CITY_RADIUS = 26;
-
-/** Fictional, replaceable asset values. These do not represent actual losses or population. */
-export const CITY_WEIGHTS: Record<string, number> = {
-  sapporo: 40_000,
-  aomori: 15_000,
-  sendai: 35_000,
-  niigata: 24_000,
-  tokyo: 120_000,
-  nagoya: 65_000,
-  kanazawa: 22_000,
-  osaka: 85_000,
-  kobe: 40_000,
-  hiroshima: 35_000,
-  takamatsu: 18_000,
-  fukuoka: 45_000,
-  kumamoto: 24_000,
-  kagoshima: 22_000,
-  naha: 15_000,
-};

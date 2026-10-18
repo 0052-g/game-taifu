@@ -1,10 +1,13 @@
 import { SIMULATION_CONFIG as CONFIG } from './config';
 import { CITIES } from './data/cities';
 import { START_POINT } from './data/map';
+import { POPULATION_CELLS, TOTAL_POPULATION, populationCellsNear } from './data/mesh';
 import { distance, terrainAt } from './geo';
-import type { EndReason, Point, SimulationEvent, SimulationState, Terrain } from './types';
+import type { CityDamage, EndReason, Point, SimulationEvent, SimulationState, Terrain } from './types';
 
 const EPSILON = 1e-9;
+// Built once. Every update visits only nearby cells and the previous local footprint.
+const POPULATION_CELL_BY_ID = new Map(POPULATION_CELLS.map((cell) => [cell.id, cell]));
 const TERRAIN_LABELS: Record<Terrain, string> = {
   ocean: '海に戻った！暖かい海でパワーチャージ',
   land: '上陸！勢力と構造が少しずつダウン',
@@ -30,7 +33,7 @@ export function strengthLimit(stability: number): number {
 }
 
 export function maxAssetScore(): number {
-  return CITIES.reduce((sum, city) => sum + city.weight, 0);
+  return TOTAL_POPULATION * CONFIG.meshAssetPointsPerPerson;
 }
 
 function emit(state: SimulationState, event: Omit<SimulationEvent, 'id' | 'position'>): void {
@@ -55,15 +58,7 @@ export function createSimulation(route: Point[]): SimulationState {
     if (distance(cleanRoute[cleanRoute.length - 1], point) > EPSILON) cleanRoute.push({ ...point });
   }
   if (cleanRoute.length < 2) throw new Error('台風から進路を描いてください。');
-  const cityDamage = Object.fromEntries(CITIES.map((city) => [city.id, {
-    remaining: city.weight,
-    damage: 0,
-    peakExposure: 0,
-    activeVisit: false,
-    visitPeakExposure: 0,
-    visitStartingRemaining: city.weight,
-    visitCount: 0,
-  }]));
+  const cityDamage = Object.fromEntries(CITIES.map((city) => [city.id, createAsset(city.weight)]));
   return {
     route: cleanRoute,
     position: { ...START_POINT },
@@ -73,6 +68,8 @@ export function createSimulation(route: Point[]): SimulationState {
     elapsedSeconds: 0,
     score: 0,
     cityDamage,
+    meshDamage: {},
+    activeMeshIds: new Set(),
     traveledDistance: 0,
     maxStrength: CONFIG.initialStrength,
     terrain: terrainAt(START_POINT),
@@ -88,46 +85,99 @@ export function createSimulation(route: Point[]): SimulationState {
   };
 }
 
+function createAsset(weight: number): CityDamage {
+  return {
+    remaining: weight,
+    damage: 0,
+    peakExposure: 0,
+    activeVisit: false,
+    visitPeakExposure: 0,
+    visitStartingRemaining: weight,
+    visitCount: 0,
+    visitEventEmitted: false,
+  };
+}
+
+function enterVisit(asset: CityDamage): void {
+  asset.activeVisit = true;
+  asset.visitPeakExposure = 0;
+  asset.visitStartingRemaining = asset.remaining;
+  asset.visitCount++;
+  asset.visitEventEmitted = false;
+}
+
+function exposureAt(strength: number, radial: number): number {
+  const influence = radial * radial * (3 - 2 * radial);
+  return Math.pow(strength / 100, CONFIG.cityExposureExponent) * influence;
+}
+
 function updateDamage(state: SimulationState): void {
-  let total = 0;
-  let affected = 0;
+  // City centers trigger readable labels only. Every person belongs to exactly one
+  // underlying census cell, so overlapping urban labels never duplicate assets.
   for (const city of CITIES) {
-    const asset = state.cityDamage[city.id];
-    const cityDistance = distance(state.position, city.position);
-    if (asset.activeVisit && cityDistance > city.radius * (1 + CONFIG.cityVisitExitMargin)) {
-      asset.activeVisit = false;
+    const group = state.cityDamage[city.id];
+    const separation = distance(state.position, city.position);
+    if (group.activeVisit && separation > city.radius * (1 + CONFIG.meshVisitExitMargin)) {
+      group.activeVisit = false;
     }
-    if (!asset.activeVisit && cityDistance < city.radius && asset.remaining > EPSILON) {
-      asset.activeVisit = true;
-      asset.visitPeakExposure = 0;
-      asset.visitStartingRemaining = asset.remaining;
-      asset.visitCount++;
-    }
-    const radial = Math.max(0, 1 - cityDistance / city.radius);
-    // One visit consumes a bounded share of the assets present at entry. Staying or
-    // making tiny loops only improves that visit's peak; a clear exit permits a new visit.
-    const influence = radial * radial * (3 - 2 * radial);
-    const exposure = Math.pow(state.strength / 100, CONFIG.cityExposureExponent) * influence;
-    asset.peakExposure = Math.max(asset.peakExposure, exposure);
-    if (asset.activeVisit && exposure > asset.visitPeakExposure) {
-      const previous = asset.visitPeakExposure;
-      asset.visitPeakExposure = exposure;
-      const visitDamage = asset.visitStartingRemaining * CONFIG.cityPassDamageFraction * exposure;
-      asset.remaining = Math.max(0, asset.visitStartingRemaining - visitDamage);
-      asset.damage = city.weight - asset.remaining;
-      if (previous < CONFIG.cityEventExposure && exposure >= CONFIG.cityEventExposure) {
-        emit(state, {
-          kind: 'city',
-          text: `${city.name}に${asset.visitCount > 1 ? '再' : ''}直撃！`,
-          score: Math.round(visitDamage),
-        });
-      }
-    }
-    total += asset.damage;
-    if (asset.damage > 0) affected++;
+    if (!group.activeVisit && separation < city.radius) enterVisit(group);
+    const exposure = exposureAt(state.strength, Math.max(0, 1 - separation / city.radius));
+    group.peakExposure = Math.max(group.peakExposure, exposure);
+    if (group.activeVisit) group.visitPeakExposure = Math.max(group.visitPeakExposure, exposure);
   }
-  state.score = total;
-  state.affectedCities = affected;
+
+  const exitRadius = CONFIG.meshWindRadius * (1 + CONFIG.meshVisitExitMargin);
+  for (const id of state.activeMeshIds) {
+    const cell = POPULATION_CELL_BY_ID.get(id)!;
+    if (distance(state.position, cell.position) > exitRadius) {
+      state.meshDamage[id].activeVisit = false;
+      state.activeMeshIds.delete(id);
+    }
+  }
+
+  const newlyDamagedByCity: Record<string, number> = {};
+  for (const cell of populationCellsNear(state.position, CONFIG.meshWindRadius)) {
+    const radial = 1 - distance(state.position, cell.position) / CONFIG.meshWindRadius;
+    if (radial <= 0) continue;
+    const weight = cell.population * CONFIG.meshAssetPointsPerPerson;
+    const asset = state.meshDamage[cell.id] ??= createAsset(weight);
+    if (asset.remaining <= EPSILON) continue;
+    if (!asset.activeVisit) {
+      enterVisit(asset);
+      state.activeMeshIds.add(cell.id);
+    }
+    const exposure = exposureAt(state.strength, radial);
+    asset.peakExposure = Math.max(asset.peakExposure, exposure);
+    if (exposure <= asset.visitPeakExposure) continue;
+    asset.visitPeakExposure = exposure;
+    // A pass consumes at most half of the assets present at entry. Waiting and
+    // tiny loops cannot drain more; exiting the footprint permits another pass.
+    const remaining = Math.max(0, asset.visitStartingRemaining * (1 - CONFIG.meshPassDamageFraction * exposure));
+    const increment = Math.max(0, asset.remaining - remaining);
+    asset.remaining = remaining;
+    asset.damage = weight - remaining;
+    if (increment <= 0) continue;
+    state.score += increment;
+    const group = state.cityDamage[cell.reportingCityId];
+    if (group.damage === 0) state.affectedCities++;
+    group.damage += increment;
+    group.remaining = Math.max(0, group.remaining - increment);
+    newlyDamagedByCity[cell.reportingCityId] = (newlyDamagedByCity[cell.reportingCityId] ?? 0) + increment;
+  }
+
+  for (const city of CITIES) {
+    const group = state.cityDamage[city.id];
+    const increment = newlyDamagedByCity[city.id] ?? 0;
+    if (group.activeVisit && !group.visitEventEmitted && increment > 0 &&
+      exposureAt(state.strength, Math.max(0, 1 - distance(state.position, city.position) / city.radius)) >= CONFIG.cityEventExposure) {
+      group.visitEventEmitted = true;
+      emit(state, {
+        kind: 'city',
+        text: `${city.name}に${group.visitCount > 1 ? '再' : ''}直撃！`,
+        score: Math.round(increment),
+      });
+    }
+  }
 }
 
 function updateWeather(state: SimulationState, seconds: number): void {

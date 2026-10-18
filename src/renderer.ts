@@ -1,7 +1,10 @@
-import { LANDMASSES, MAP_HEIGHT, MAP_WIDTH, MOUNTAIN_ZONES, START_POINT } from './data/map';
+import { LANDMASSES, MAP_HEIGHT, MAP_WIDTH, START_POINT } from './data/map';
 import { CITIES } from './data/cities';
+import { MESH_CELLS, POPULATION_CELLS, meshCellBounds } from './data/mesh';
 import { SIMULATION_CONFIG } from './config';
 import type { Point, SimulationState } from './types';
+
+export type MapLayer = 'terrain' | 'population';
 
 export interface RenderFrame {
   route: Point[];
@@ -12,19 +15,13 @@ export interface RenderFrame {
 }
 
 type Label = { id: string; x: number; y: number; width: number; height: number; align: CanvasTextAlign; leader?: Point };
+type MeshBounds = ReturnType<typeof meshCellBounds>;
+type VisibleMesh = { cell: (typeof MESH_CELLS)[number]; bounds: MeshBounds };
 type Popup = { id: number | string; text: string; position: Point; born: number; kind: string; score?: number };
 
 const INK = '#234f4b';
 const CORAL = '#f47b65';
 const FONT = '"Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif';
-
-function polygon(ctx: CanvasRenderingContext2D, points: readonly Point[]): void {
-  if (!points.length) return;
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-  ctx.closePath();
-}
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
   ctx.beginPath();
@@ -34,7 +31,15 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: n
 /** Canvas coordinates stay in map units; pointer input uses the same fitted transform. */
 export class CanvasRenderer {
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly background: HTMLCanvasElement;
+  private readonly backgrounds: Record<MapLayer, HTMLCanvasElement>;
+  private readonly landPath = new Path2D();
+  private readonly visibleMesh: VisibleMesh[] = [];
+  private readonly populationBounds = new Map<number, MeshBounds>();
+  private readonly damageOverlay = document.createElement('canvas');
+  private readonly damageCtx: CanvasRenderingContext2D;
+  private layer: MapLayer = 'terrain';
+  private lastDamagePaint = -Infinity;
+  private lastDamageScore = -1;
   private cssWidth = MAP_WIDTH;
   private cssHeight = MAP_HEIGHT;
   private scale = 1;
@@ -43,6 +48,7 @@ export class CanvasRenderer {
   private dpr = 1;
   private labels: Label[] = [];
   private cityFontSize = 14;
+  private readonly maxCityWeight = Math.max(...CITIES.map((city) => city.weight), 1);
   private routePath = new Path2D();
   private routeRef: Point[] | null = null;
   private routeCount = -1;
@@ -60,9 +66,19 @@ export class CanvasRenderer {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('このブラウザでは Canvas 2D を利用できません。');
     this.ctx = context;
-    this.background = document.createElement('canvas');
-    this.buildBackground();
+    this.backgrounds = { terrain: document.createElement('canvas'), population: document.createElement('canvas') };
+    this.prepareMapGeometry();
+    this.buildBackground('terrain');
+    this.buildBackground('population');
+    this.damageOverlay.width = MAP_WIDTH * 2;
+    this.damageOverlay.height = MAP_HEIGHT * 2;
+    this.damageCtx = this.damageOverlay.getContext('2d')!;
+    this.damageCtx.scale(2, 2);
     this.resize();
+  }
+
+  setLayer(layer: MapLayer): void {
+    this.layer = layer;
   }
 
   resize(): void {
@@ -95,6 +111,9 @@ export class CanvasRenderer {
       this.traveledRoute = null;
       this.traveledSegment = -1;
       this.lastElapsedDays = -1;
+      this.damageCtx.clearRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+      this.lastDamagePaint = -Infinity;
+      this.lastDamageScore = -1;
     }
     const motionFrame = this.reducedMotion.matches ? { ...frame, time: 0 } : frame;
     const { ctx } = this;
@@ -108,7 +127,8 @@ export class CanvasRenderer {
     ctx.beginPath();
     ctx.rect(0, 0, MAP_WIDTH, MAP_HEIGHT);
     ctx.clip();
-    ctx.drawImage(this.background, 0, 0, MAP_WIDTH, MAP_HEIGHT);
+    ctx.drawImage(this.backgrounds[this.layer], 0, 0, MAP_WIDTH, MAP_HEIGHT);
+    this.drawMeshDamage(frame);
     this.drawSeaMotion(motionFrame.time);
     this.drawCities(frame.state);
     this.drawRoute(motionFrame);
@@ -119,11 +139,32 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  private buildBackground(): void {
-    // A fixed high-resolution layer keeps every animation frame inexpensive.
-    this.background.width = MAP_WIDTH * 2;
-    this.background.height = MAP_HEIGHT * 2;
-    const ctx = this.background.getContext('2d')!;
+  private prepareMapGeometry(): void {
+    for (const land of LANDMASSES) {
+      for (const ring of [land.points, ...(land.holes ?? [])]) {
+        if (!ring.length) continue;
+        this.landPath.moveTo(ring[0].x, ring[0].y);
+        for (let i = 1; i < ring.length; i++) this.landPath.lineTo(ring[i].x, ring[i].y);
+        this.landPath.closePath();
+      }
+    }
+    const visible = (bounds: MeshBounds) => bounds.x + bounds.width > 0 && bounds.y + bounds.height > 0 && bounds.x < MAP_WIDTH && bounds.y < MAP_HEIGHT;
+    for (const cell of MESH_CELLS) {
+      const bounds = meshCellBounds(cell);
+      if (visible(bounds)) this.visibleMesh.push({ cell, bounds });
+    }
+    for (const cell of POPULATION_CELLS) {
+      const bounds = meshCellBounds(cell);
+      if (visible(bounds)) this.populationBounds.set(cell.id, bounds);
+    }
+  }
+
+  private buildBackground(layer: MapLayer): void {
+    // Rasterize each layer once at 2× resolution; the animation only blits a cache.
+    const background = this.backgrounds[layer];
+    background.width = MAP_WIDTH * 2;
+    background.height = MAP_HEIGHT * 2;
+    const ctx = background.getContext('2d')!;
     ctx.scale(2, 2);
     ctx.fillStyle = '#e4f3ef';
     ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
@@ -133,8 +174,6 @@ export class CanvasRenderer {
     warm.addColorStop(1, '#e4f3ef00');
     ctx.fillStyle = warm;
     ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
-
-    // A quiet survey grid adds texture without competing with a drawn course.
     ctx.strokeStyle = '#91bcb53d';
     ctx.lineWidth = 0.75;
     for (let x = 40; x < MAP_WIDTH; x += 80) {
@@ -148,65 +187,74 @@ export class CanvasRenderer {
       }
     }
 
-    for (const land of LANDMASSES) {
-      ctx.save();
-      ctx.translate(0, 4);
-      polygon(ctx, land.points);
-      ctx.fillStyle = '#80b7a53f';
-      ctx.fill();
-      ctx.restore();
-      polygon(ctx, land.points);
-      ctx.fillStyle = '#aed6ad';
-      ctx.fill();
-      ctx.strokeStyle = '#4e8a73';
-      ctx.lineWidth = 2.1;
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-      ctx.save();
-      ctx.clip();
-      ctx.translate(-2, -3);
-      polygon(ctx, land.points);
-      ctx.strokeStyle = '#d5e8b7';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Mountain shading uses the simulation polygons, so the visual hint matches play.
     ctx.save();
-    ctx.beginPath();
-    for (const land of LANDMASSES) {
-      if (!land.points.length) continue;
-      ctx.moveTo(land.points[0].x, land.points[0].y);
-      for (const p of land.points.slice(1)) ctx.lineTo(p.x, p.y);
-      ctx.closePath();
-    }
-    ctx.clip();
-    for (const mountain of MOUNTAIN_ZONES) {
-      ctx.save();
-      polygon(ctx, mountain.points);
-      ctx.fillStyle = '#739f7865';
-      ctx.fill();
-      ctx.clip();
-      const minX = Math.min(...mountain.points.map((p) => p.x));
-      const maxX = Math.max(...mountain.points.map((p) => p.x));
-      const minY = Math.min(...mountain.points.map((p) => p.y));
-      const maxY = Math.max(...mountain.points.map((p) => p.y));
-      ctx.strokeStyle = '#5f8d7388';
-      ctx.lineWidth = 1.4;
-      for (let y = minY; y <= maxY + 12; y += 20) {
-        for (let x = minX + (Math.round(y / 20) % 2) * 13; x <= maxX; x += 26) {
-          ctx.beginPath();
-          ctx.moveTo(x - 6, y + 5);
-          ctx.lineTo(x, y - 5);
-          ctx.lineTo(x + 6, y + 5);
-          ctx.stroke();
-        }
+    ctx.translate(0, 2.5);
+    ctx.fillStyle = '#6eaa953b';
+    ctx.fill(this.landPath, 'evenodd');
+    ctx.restore();
+    ctx.fillStyle = layer === 'terrain' ? '#d6e5ce' : '#e5ecd4';
+    ctx.fill(this.landPath, 'evenodd');
+    ctx.save();
+    ctx.clip(this.landPath, 'evenodd');
+    const terrainStops: [number, readonly number[]][] = [
+      [0, [211, 231, 187]], [100, [196, 221, 169]], [350, [166, 198, 145]],
+      [700, [133, 171, 133]], [1200, [100, 145, 121]], [1900, [73, 114, 104]], [3000, [53, 91, 86]],
+    ];
+    const populationStops: [number, readonly number[]][] = [
+      [0, [229, 236, 212]], [0.15, [241, 234, 207]], [0.35, [245, 208, 165]],
+      [0.55, [236, 166, 122]], [0.76, [224, 117, 91]], [1, [171, 73, 68]],
+    ];
+    const colorAt = (value: number, stops: [number, readonly number[]][]): string => {
+      let i = 1;
+      while (i < stops.length - 1 && value > stops[i][0]) i++;
+      const [low, a] = stops[i - 1];
+      const [high, b] = stops[i];
+      const blend = Math.max(0, Math.min(1, (value - low) / (high - low)));
+      return `rgb(${a.map((channel, j) => Math.round(channel + (b[j] - channel) * blend)).join(',')})`;
+    };
+    for (const { cell, bounds } of this.visibleMesh) {
+      const { x, y, width, height } = bounds;
+      if (layer === 'terrain') {
+        // Missing DEM samples remain neutral: null never stands in for sea level.
+        ctx.fillStyle = cell.elevationM === null ? '#d6e5ce' : colorAt(Math.max(0, cell.elevationM) + Math.max(0, cell.reliefM ?? 0) * 0.12, terrainStops);
+      } else {
+        const density = cell.population / cell.areaKm2;
+        const heat = Math.max(0, Math.min(1, Math.log10(1 + density) / Math.log10(12_001)));
+        ctx.fillStyle = colorAt(heat, populationStops);
       }
-      ctx.restore();
+      // A tiny overlap prevents raster seams when the cached map is downsampled.
+      ctx.fillRect(x, y, width + 0.12, height + 0.12);
+    }
+    if (layer === 'population') {
+      // The census grid is visible over populated clusters without outlining the sea.
+      ctx.beginPath();
+      for (const { cell, bounds } of this.visibleMesh) {
+        if (cell.population <= 0) continue;
+        ctx.rect(bounds.x, bounds.y, bounds.width, bounds.height);
+      }
+      ctx.strokeStyle = '#fffaf030';
+      ctx.lineWidth = 0.3;
+      ctx.stroke();
+    } else {
+      // Sparse relief marks identify high, rugged cells; heights are actual DEM values.
+      ctx.beginPath();
+      for (const { cell, bounds } of this.visibleMesh) {
+        if (cell.elevationM === null || cell.elevationM < 700 || (cell.reliefM ?? 0) < 200 || cell.id % 29 !== 0) continue;
+        const x = bounds.x + bounds.width / 2;
+        const y = bounds.y + bounds.height / 2;
+        ctx.moveTo(x - 2.3, y + 1.5);
+        ctx.lineTo(x, y - 2);
+        ctx.lineTo(x + 2.3, y + 1.5);
+      }
+      ctx.strokeStyle = '#e0e9bf85';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
     }
     ctx.restore();
-
+    ctx.strokeStyle = '#528d798c';
+    ctx.lineWidth = 1.1;
+    ctx.lineJoin = 'round';
+    ctx.stroke(this.landPath);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#74a49b';
     ctx.font = `500 18px ${FONT}`;
@@ -221,10 +269,32 @@ export class CanvasRenderer {
     ctx.fillStyle = '#9aab85';
     ctx.fillText('あたたかい海でパワーチャージ', 204, 585);
     this.drawCompass(ctx);
-    ctx.textAlign = 'left';
-    ctx.font = `500 11px ${FONT}`;
-    ctx.fillStyle = '#7b9e92';
-    ctx.fillText('ゲーム用の簡略地図', 30, MAP_HEIGHT - 24);
+  }
+
+  private drawMeshDamage(frame: RenderFrame): void {
+    const state = frame.state;
+    if (!state) return;
+    if (state.score !== this.lastDamageScore && (frame.phase === 'finished' || frame.time - this.lastDamagePaint >= 180)) {
+      const ctx = this.damageCtx;
+      ctx.clearRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+      ctx.save();
+      ctx.clip(this.landPath, 'evenodd');
+      // meshDamage is lazy and sparse. Repaint reached cells at most ~5 Hz;
+      // never walk the full national mesh dataset in the animation loop.
+      for (const [id, damage] of Object.entries(state.meshDamage)) {
+        if (damage.damage <= 0) continue;
+        const bounds = this.populationBounds.get(Number(id));
+        if (!bounds) continue;
+        const total = damage.remaining + damage.damage;
+        const fraction = total > 0 ? Math.min(1, damage.damage / total) : 0;
+        ctx.fillStyle = `rgba(188, 74, 53, ${0.12 + fraction * 0.52})`;
+        ctx.fillRect(bounds.x, bounds.y, bounds.width + 0.12, bounds.height + 0.12);
+      }
+      ctx.restore();
+      this.lastDamageScore = state.score;
+      this.lastDamagePaint = frame.time;
+    }
+    this.ctx.drawImage(this.damageOverlay, 0, 0, MAP_WIDTH, MAP_HEIGHT);
   }
 
   private drawCompass(ctx: CanvasRenderingContext2D): void {
@@ -289,7 +359,7 @@ export class CanvasRenderer {
     const majorOnly = this.cssWidth < 500;
     const priority = [...CITIES].sort((a, b) => b.weight - a.weight);
     for (const city of priority) {
-      if (majorOnly && city.weight < 35_000 && priority.indexOf(city) > 7) continue;
+      if (majorOnly && priority.indexOf(city) > 7 && !['tokyo', 'osaka', 'nagoya'].includes(city.id)) continue;
       const width = ctx.measureText(city.name).width + 6;
       const height = this.cityFontSize + 6;
       const gap = 13;
@@ -343,7 +413,7 @@ export class CanvasRenderer {
       const { x, y } = city.position;
       const asset = state?.cityDamage[city.id];
       const damaged = asset ? Math.min(1, asset.damage / (asset.remaining + asset.damage || 1)) : 0;
-      const markerSize = 5 + Math.min(3, city.weight / 40_000);
+      const markerSize = 5 + Math.sqrt(city.weight / this.maxCityWeight) * 3;
       ctx.save();
       ctx.translate(x, y);
       ctx.fillStyle = '#789e8875';

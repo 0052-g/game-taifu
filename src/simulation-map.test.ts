@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { SIMULATION_CONFIG as CONFIG } from './config';
 import { CITIES } from './data/cities';
 import { START_POINT } from './data/map';
-import { project } from './geo';
+import { meshAt, POPULATION_CELLS } from './data/mesh';
+import { distance, project } from './geo';
 import { createSimulation, maxAssetScore, stepSimulation } from './simulation';
 import type { Point } from './types';
 
 const city = (id: string) => CITIES.find((entry) => entry.id === id)!.position;
 
-// These routes use real game geography: coastal recovery, several inland belts,
-// and repeated exposures. Broad ranges protect playability rather than exact snapshots.
+// These routes use the real coast, GSI-derived terrain, and census population.
+// Broad ranges protect playability; the nationwide population determines the asset scale.
 const coastalRoute: Point[] = [
   START_POINT, { x: 440, y: 570 }, { x: 445, y: 455 }, city('osaka'),
   { x: 570, y: 432 }, city('nagoya'), { x: 635, y: 419 }, city('tokyo'),
@@ -32,8 +34,30 @@ describe('playability on Japan game geography', () => {
     expect(state.strength).toBeGreaterThan(60);
     expect(state.strength).toBeLessThan(85);
     expect(state.stability).toBeGreaterThan(80);
-    expect(state.score).toBeGreaterThan(60_000);
-    expect(state.score).toBeLessThan(100_000);
+    // This corridor reaches a large share of Japan's populated Pacific belt;
+    // expect a useful share of the nationwide capacity rather than fictional city weights.
+    expect(state.score).toBeGreaterThan(maxAssetScore() * 0.08);
+    expect(state.score).toBeLessThan(maxAssetScore() * 0.16);
+    expect(Object.keys(state.meshDamage).length).toBeGreaterThan(2_000);
+    expect(Object.keys(state.meshDamage).length).toBeLessThan(POPULATION_CELLS.length);
+    expect(Object.values(state.meshDamage).reduce((sum, asset) => sum + asset.damage, 0)).toBeCloseTo(state.score, 6);
+    expect(Object.values(state.cityDamage).reduce((sum, asset) => sum + asset.damage, 0)).toBeCloseTo(state.score, 6);
+    expect(Object.values(state.cityDamage).reduce((sum, asset) => sum + asset.damage + asset.remaining, 0)).toBeCloseTo(maxAssetScore(), 6);
+  });
+
+  it('scores actual population in Shizuoka outside every major-city hit circle', () => {
+    const shizuoka = project(138.38, 34.97);
+    expect(CITIES.every((entry) => distance(shizuoka, entry.position) > entry.radius)).toBe(true);
+    const localCell = meshAt(shizuoka)!;
+    expect(localCell.population).toBeGreaterThan(100_000);
+    const state = createSimulation([START_POINT, shizuoka]);
+    stepSimulation(state, 100);
+    expect(state.endReason).toBe('route-complete');
+    const asset = state.meshDamage[localCell.id];
+    expect(asset.damage).toBeGreaterThan(0);
+    expect(asset.damage + asset.remaining).toBeCloseTo(localCell.population * CONFIG.meshAssetPointsPerPerson, 8);
+    expect(state.score).toBeGreaterThan(asset.damage);
+    expect(state.score).toBeLessThan(maxAssetScore());
   });
 
   it('survives a long inland journey across Japan while retaining a substantial mountain penalty', () => {

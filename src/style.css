@@ -1693,3 +1693,94 @@ canvas {
     margin-top:17px
   }
 }
+
+/* Actual census/elevation layers and their provenance. */
+.layer-switch {
+  display:flex;
+  gap:3px;
+  padding:3px;
+  border:1px solid #cadccd;
+  border-radius:7px;
+  background:#e6f0e6;
+  flex-shrink:0;
+}
+.layer-switch button {
+  border:0;
+  border-radius:4px;
+  background:transparent;
+  color:#7a9380;
+  padding:7px 12px;
+  font-size:10px;
+}
+.layer-switch button.selected {
+  color:#386b53;
+  background:#fffdf5;
+  box-shadow:0 1px 4px #48694e12;
+  font-weight:700;
+}
+.mesh-readout {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px 16px;
+  padding:8px 20px;
+  border-top:1px solid #dde8d8;
+  background:#f9faf2;
+  color:#7f9177;
+  font-size:10px;
+}
+.mesh-readout strong {
+  color:#547759;
+  font-size:11px;
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.mesh-caption { color:#9ba58b; font-size:9px; }
+.source-button {
+  margin-left:auto;
+  background:transparent;
+  border:0;
+  padding:8px 0 8px 8px;
+  color:#789273;
+  font-size:9px;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.source-button:hover { color:#355f47; }
+.population-legend { justify-content:space-between; }
+.density-scale { gap:9px!important; }
+.map-legend .density-scale i {
+  width:74px;
+  height:6px;
+  background:linear-gradient(to right,#f8ebcc,#f3b28d,#d66d59);
+}
+.sources-modal h3 { font-size:13px; margin:0 0 8px; }
+.sources-modal section { border-top:1px solid #e2e8d8; margin-top:20px; padding-top:17px; }
+.sources-modal p { font-size:11px; line-height:1.95; color:#7c8b70; margin:8px 0; }
+.sources-modal .source-intro { font-size:12px; margin-bottom:20px; }
+.sources-modal a {
+  display:block;
+  color:#648569;
+  font-size:10px;
+  line-height:1.8;
+  margin-top:7px;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.sources-modal .source-footnote { margin-top:21px; font-size:10px; color:#98a088; }
+@media(max-width:960px) {
+  .layer-switch button { padding:6px 10px; }
+  .mesh-readout { padding:7px 14px; gap:5px 12px; font-size:9px; }
+  .mesh-caption { font-size:8px; }
+  .mesh-readout strong { font-size:10px; }
+}
+@media(max-width:760px) {
+  .map-subtitle { display:none; }
+  .layer-switch button { min-height:29px; padding:6px 13px; font-size:10px; }
+  .mesh-readout { padding:7px 14px; gap:3px 10px; }
+  .mesh-caption { flex-basis:100%; }
+  .mesh-readout strong { font-size:11px; }
+  .source-button { min-height:30px; }
+  .population-legend { font-size:8px; }
+  .map-legend .density-scale i { width:44px; }
+}
