@@ -2,9 +2,10 @@ import { LANDMASSES, MAP_HEIGHT, MAP_WIDTH, START_POINT } from './data/map';
 import { CITIES } from './data/cities';
 import { MESH_CELLS, MESH_GRID, POPULATION_CELLS, meshCellBounds } from './data/mesh';
 import { SIMULATION_CONFIG } from './config';
+import { assetFill, initialAssetPoints, remainingAssetPoints } from './asset-display';
 import type { Point, SimulationState } from './types';
 
-export type MapLayer = 'terrain' | 'population';
+export type MapLayer = 'terrain' | 'population' | 'assets';
 
 export interface RenderFrame {
   route: Point[];
@@ -34,7 +35,7 @@ export class CanvasRenderer {
   private readonly backgrounds: Record<MapLayer, HTMLCanvasElement>;
   private readonly landPath = new Path2D();
   private readonly visibleMesh: VisibleMesh[] = [];
-  private readonly populationBounds = new Map<number, MeshBounds>();
+  private readonly populationBounds = new Map<number, MeshBounds & { id: number; population: number }>();
   private readonly damageOverlay = document.createElement('canvas');
   private readonly landMask = document.createElement('canvas');
   private readonly cloudSprite = document.createElement('canvas');
@@ -48,8 +49,11 @@ export class CanvasRenderer {
   private damageNeedsRebuild = true;
   private hasDamagePixels = false;
   private readonly damageCtx: CanvasRenderingContext2D;
-  private layer: MapLayer = 'terrain';
+  private layer: MapLayer = 'assets';
   private lastDamagePaint = -Infinity;
+  private lastFrameTime: number | null = null;
+  private frameIntervalAverage = 16;
+  private damagePaintInterval = 100;
   private cssWidth = MAP_WIDTH;
   private cssHeight = MAP_HEIGHT;
   private scale = 1;
@@ -76,7 +80,8 @@ export class CanvasRenderer {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('このブラウザでは Canvas 2D を利用できません。');
     this.ctx = context;
-    this.backgrounds = { terrain: document.createElement('canvas'), population: document.createElement('canvas') };
+    const thematicBackground = document.createElement('canvas');
+    this.backgrounds = { terrain: document.createElement('canvas'), population: thematicBackground, assets: thematicBackground };
     this.damageCtx = this.damageOverlay.getContext('2d')!;
     this.prepareMapGeometry();
     this.buildCloudSprite();
@@ -84,8 +89,15 @@ export class CanvasRenderer {
   }
 
   setLayer(layer: MapLayer): void {
+    const overlayChanges = (this.layer === 'assets') !== (layer === 'assets');
     this.layer = layer;
     if (!this.backgroundReady.has(layer)) this.buildBackground(layer);
+    if (overlayChanges) {
+      this.damageCtx.clearRect(0, 0, this.damageOverlay.width, this.damageOverlay.height);
+      this.damageNeedsRebuild = true;
+      this.hasDamagePixels = false;
+      this.lastDamagePaint = -Infinity;
+    }
   }
 
   resize(): void {
@@ -114,9 +126,8 @@ export class CanvasRenderer {
     if (this.landMask.width !== cacheWidth || this.landMask.height !== cacheHeight || this.cacheRatio === 0) {
       this.cacheRatio = ratio;
       this.backgroundReady.clear();
-      for (const layer of ['terrain', 'population'] as const) {
-        if (layer !== this.layer) this.backgrounds[layer].width = this.backgrounds[layer].height = 1;
-      }
+      const inactive = this.layer === 'terrain' ? this.backgrounds.population : this.backgrounds.terrain;
+      inactive.width = inactive.height = 1;
       this.buildBackground(this.layer);
       this.landMask.width = this.damageOverlay.width = cacheWidth;
       this.landMask.height = this.damageOverlay.height = cacheHeight;
@@ -139,8 +150,22 @@ export class CanvasRenderer {
   }
 
   render(frame: RenderFrame): void {
+    const stateChanged = frame.state !== this.renderedState;
+    const interval = this.lastFrameTime === null ? null : frame.time - this.lastFrameTime;
+    // Adapt color updates only. A pause/resume or clock restart must not bias
+    // the moving average; hysteresis prevents toggling near the thresholds.
+    if (stateChanged || interval === null || interval < 0 || interval > 1000) {
+      this.frameIntervalAverage = 16;
+      this.damagePaintInterval = 100;
+      if (interval !== null && (interval < 0 || interval > 1000)) this.lastDamagePaint = -Infinity;
+    } else if (interval > 0) {
+      this.frameIntervalAverage += (Math.min(interval, 250) - this.frameIntervalAverage) * 0.15;
+      if (this.frameIntervalAverage > 40) this.damagePaintInterval = 180;
+      else if (this.frameIntervalAverage < 25) this.damagePaintInterval = 100;
+    }
+    this.lastFrameTime = frame.time;
     // A retry may replace the simulation directly without an intervening planning frame.
-    if (frame.state !== this.renderedState) {
+    if (stateChanged) {
       this.renderedState = frame.state;
       this.seenEvents.clear();
       this.popups = [];
@@ -191,12 +216,17 @@ export class CanvasRenderer {
     }
     for (const cell of POPULATION_CELLS) {
       const bounds = meshCellBounds(cell);
-      if (visible(bounds)) this.populationBounds.set(cell.id, bounds);
+      if (visible(bounds)) this.populationBounds.set(cell.id, { ...bounds, id: cell.id, population: cell.population });
     }
   }
 
   private buildBackground(layer: MapLayer): void {
-    // Match the displayed pixels, capped at DPR 2. Population is built on demand.
+    // Terrain keeps its own cache. Population and remaining assets share one
+    // thematic canvas, rebuilt only when switching between those two views.
+    if (layer !== 'terrain') {
+      this.backgroundReady.delete('population');
+      this.backgroundReady.delete('assets');
+    }
     const background = this.backgrounds[layer];
     background.width = Math.round(MAP_WIDTH * this.cacheRatio);
     background.height = Math.round(MAP_HEIGHT * this.cacheRatio);
@@ -253,6 +283,9 @@ export class CanvasRenderer {
       if (layer === 'terrain') {
         // Missing DEM samples remain neutral: null never stands in for sea level.
         ctx.fillStyle = cell.elevationM === null ? '#d6e5ce' : colorAt(Math.max(0, cell.elevationM) + Math.max(0, cell.reliefM ?? 0) * 0.12, terrainStops);
+      } else if (layer === 'assets') {
+        const initial = initialAssetPoints(cell.population);
+        ctx.fillStyle = assetFill(initial, initial);
       } else {
         const density = cell.population / cell.areaKm2;
         const heat = Math.max(0, Math.min(1, Math.log10(1 + density) / Math.log10(12_001)));
@@ -271,7 +304,7 @@ export class CanvasRenderer {
       ctx.strokeStyle = '#fffaf030';
       ctx.lineWidth = 0.3;
       ctx.stroke();
-    } else {
+    } else if (layer === 'terrain') {
       // Sparse relief marks identify high, rugged cells; heights are actual DEM values.
       ctx.beginPath();
       for (const { cell, bounds } of this.visibleMesh) {
@@ -312,7 +345,7 @@ export class CanvasRenderer {
     const state = frame.state;
     if (!state) return;
     const rebuild = this.damageNeedsRebuild;
-    if (rebuild || (state.meshDamageDirtyIds.size > 0 && (frame.phase === 'finished' || frame.time - this.lastDamagePaint >= 180))) {
+    if (rebuild || (state.meshDamageDirtyIds.size > 0 && (frame.phase === 'finished' || frame.time - this.lastDamagePaint >= this.damagePaintInterval))) {
       const ids: Iterable<number> = rebuild ? Object.keys(state.meshDamage).map(Number) : state.meshDamageDirtyIds;
       let minIx = Infinity, minIy = Infinity, maxIx = -Infinity, maxIy = -Infinity;
       let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
@@ -348,9 +381,13 @@ export class CanvasRenderer {
             const y = Math.round(bounds.y * sy);
             const width = Math.round((bounds.x + bounds.width) * sx) - x;
             const height = Math.round((bounds.y + bounds.height) * sy) - y;
-            const total = damage.remaining + damage.damage;
-            const fraction = total > 0 ? Math.min(1, damage.damage / total) : 0;
-            ctx.fillStyle = `rgba(188, 74, 53, ${0.12 + fraction * 0.52})`;
+            if (this.layer === 'assets') {
+              ctx.fillStyle = assetFill(initialAssetPoints(bounds.population), remainingAssetPoints(bounds, state));
+            } else {
+              const total = damage.remaining + damage.damage;
+              const fraction = total > 0 ? Math.min(1, damage.damage / total) : 0;
+              ctx.fillStyle = `rgba(188, 74, 53, ${0.12 + fraction * 0.52})`;
+            }
             ctx.fillRect(x, y, width, height);
             this.hasDamagePixels = true;
           }

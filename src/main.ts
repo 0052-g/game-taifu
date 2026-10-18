@@ -3,6 +3,7 @@ import { CITIES } from './data/cities';
 import { MAP_HEIGHT, MAP_WIDTH, START_POINT } from './data/map';
 import { distance } from './geo';
 import { meshAt, POPULATION_YEAR, TOTAL_POPULATION } from './data/mesh';
+import { initialAssetPoints, remainingAssetPoints, remainingAssetsNear } from './asset-display';
 import { CanvasRenderer, type MapLayer } from './renderer';
 import { createSimulation, dateFromElapsedDays, stepSimulation } from './simulation';
 import type { Point, SimulationState } from './types';
@@ -13,7 +14,7 @@ const play = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><p
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <header class="site-header">
-    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.2.1</span></a>
+    <a class="brand" href="./" aria-label="台風メーカー トップ">${spiral}<span>台風メーカー<span class="brand-dot">.</span></span><span class="version">V0.2.2</span></a>
     <div class="header-actions"><span class="personal-best"><span>自己ベスト</span><strong id="best-score">0</strong><small>pt</small></span><button class="help-button" id="help-open" aria-label="遊び方を開く">? <span>遊び方</span></button></div>
   </header>
   <main class="page">
@@ -31,10 +32,12 @@ app.innerHTML = `
 
     <div class="game-layout">
       <section class="map-card" aria-label="日本地図と進路の作成">
-        <div class="map-toolbar"><div class="map-title"><span class="live-dot" id="live-dot"></span><strong id="map-phase">進路をデザイン</strong><span class="map-subtitle">JAPAN & THE PACIFIC</span></div><div class="layer-switch" aria-label="地図の表示"><button data-layer="terrain" class="selected" aria-pressed="true">地形</button><button data-layer="population" aria-pressed="false">人口</button></div></div>
+        <div class="map-toolbar"><div class="map-title"><span class="live-dot" id="live-dot"></span><strong id="map-phase">進路をデザイン</strong><span class="map-subtitle">JAPAN & THE PACIFIC</span></div><div class="layer-switch" aria-label="地図の表示"><button data-layer="assets" class="selected" aria-pressed="true">残りpt</button><button data-layer="terrain" aria-pressed="false">地形</button><button data-layer="population" aria-pressed="false">人口</button></div></div>
         <div class="canvas-wrap"><canvas id="game-canvas" aria-label="日本地図。海上の台風からマウスまたは指で進路を描いてください。キーボードではおまかせ進路ボタンを利用できます。"></canvas><div class="map-hint" id="map-hint"><span class="hint-pencil">〰</span><span><strong>台風から、一筆書き。</strong><small>マウスや指で、好きな進路を描こう</small></span></div><div class="pause-overlay" id="pause-overlay" hidden><span>Ⅱ</span><strong>ちょっとひと休み</strong><small>「再開」で冒険のつづきへ</small></div></div>
-        <div class="map-legend" id="terrain-legend"><span><i class="legend-ocean"></i>海：勢力回復</span><span><i class="legend-land"></i>陸：勢力低下</span><span><i class="legend-mountain">⌃</i>山：大きく低下</span><span><i class="legend-city"></i>人口メッシュ：得点</span></div>
+        <div class="map-legend assets-legend" id="assets-legend"><span>残り資産マップ</span><span class="asset-color-scale"><i></i>消費済み → 多い</span><span>通過すると灰色へ</span></div>
+        <div class="map-legend" id="terrain-legend" hidden><span><i class="legend-ocean"></i>海：勢力回復</span><span><i class="legend-land"></i>陸：勢力低下</span><span><i class="legend-mountain">⌃</i>山：大きく低下</span><span><i class="legend-city"></i>人口メッシュ：得点</span></div>
         <div class="map-legend population-legend" id="population-legend" hidden><span>2020年国勢調査の人口密度</span><span class="density-scale"><i></i>少ない → 多い</span><span>約5kmメッシュ</span></div>
+        <div class="asset-readout" aria-label="現在地周辺の残り資産"><div class="mesh-asset-summary"><span class="asset-readout-label">このマスの残りpt</span><div class="asset-readout-value"><strong id="mesh-remaining">0</strong><small>pt <span>／初期 <b id="mesh-initial">0</b> pt</span></small><span id="mesh-remaining-percent" class="remaining-percent">対象なし</span></div><div id="mesh-remaining-meter" class="remaining-meter" role="progressbar" aria-label="現在メッシュの残り資産の割合" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="mesh-remaining-bar"></i></div></div><div class="nearby-asset-summary"><span class="asset-readout-label">台風周辺の残りpt</span><div class="asset-readout-value"><strong id="nearby-remaining">0</strong><small>pt</small></div><span class="asset-readout-note">風の範囲内の残資産を合計</span></div><p class="asset-readout-footnote">獲得できる得点の上限です。実際の得点は勢力・距離と通過回数で変わります。</p></div>
         <div class="mesh-readout"><span class="mesh-caption">台風の現在メッシュ</span><span>人口 <strong id="mesh-population">0</strong> 人</span><span>平均標高 <strong id="mesh-elevation">海上</strong></span><button id="sources-open" class="source-button">データ出典 ↗</button></div>
         <div class="map-footer"><span id="route-info">まだ進路が描かれていません</span><span class="map-note">人口：国勢調査2020 ／ 標高：国土地理院（加工）</span></div>
       </section>
@@ -49,10 +52,10 @@ app.innerHTML = `
     </div>
 
     <section class="asset-strip" aria-label="主要都市周辺の人口メッシュ資産残量"><div class="asset-title"><span>都市周辺の残り資産</span><small>人口メッシュをゲーム用に換算</small></div><div id="city-assets" class="city-assets"></div></section>
-    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.2.1</b></span></footer>
+    <footer class="page-footer"><span>${spiral} TAIFU MAKER <span>—</span> A LITTLE STORM, A BIG ADVENTURE.</span><span>気象予測ではない、気ままな台風シミュレーション。<b>VERSION 0.2.2</b></span></footer>
   </main>
 
-  <dialog id="help-dialog" class="modal"><button class="modal-close" data-close="help-dialog" aria-label="閉じる">×</button><span class="eyebrow">HOW TO PLAY</span><h2>台風の冒険をつくろう。</h2><ol class="help-steps"><li><b>進路を描く</b><p>海上の台風から、指やマウスで一筆書き。線の交差・同じ場所の再通過もOK。離したら、線の終点から続きを描けます。</p></li><li><b>「台風、出発！」を押す</b><p>暖かい海では回復、陸上や山では衰退。人口の多いメッシュに強い勢力で近づくほど得点が伸びます。「人口」表示で人の集まる場所を探そう。</p></li><li><b>記録に挑戦する</b><p>終点への到達、勢力・構造の低下、冬の到来で終了。海で立て直して再上陸すると、残った資産からまた得点できます。同じメッシュに居続けても加点は増えず、残り資産が減るほど、同じ勢力での得点は小さくなります。</p></li></ol><p class="help-footnote">キーボードでも「おまかせ進路」で遊べます。人口メッシュ版の自己ベストをこのブラウザに保存。人口・標高は実データ、資産・被害スコアはゲーム用の換算値です。</p><button class="primary-button" data-close="help-dialog">わかった、やってみよう！ ${arrow}</button></dialog>
+  <dialog id="help-dialog" class="modal"><button class="modal-close" data-close="help-dialog" aria-label="閉じる">×</button><span class="eyebrow">HOW TO PLAY</span><h2>台風の冒険をつくろう。</h2><ol class="help-steps"><li><b>進路を描く</b><p>海上の台風から、指やマウスで一筆書き。線の交差・同じ場所の再通過もOK。離したら、線の終点から続きを描けます。</p></li><li><b>「台風、出発！」を押す</b><p>暖かい海では回復、陸上や山では衰退。人口の多いメッシュに強い勢力で近づくほど得点が伸びます。「残りpt」表示の金色の場所で、残った資産を狙おう。地形や人口の表示にも切り替えられます。</p></li><li><b>記録に挑戦する</b><p>終点への到達、勢力・構造の低下、冬の到来で終了。海で立て直して再上陸すると、残った資産からまた得点できます。同じメッシュに居続けても加点は増えず、残り資産が減るほど、同じ勢力での得点は小さくなります。</p></li></ol><p class="help-footnote">キーボードでも「おまかせ進路」で遊べます。人口メッシュ版の自己ベストをこのブラウザに保存。人口・標高は実データ、資産・被害スコアはゲーム用の換算値です。</p><button class="primary-button" data-close="help-dialog">わかった、やってみよう！ ${arrow}</button></dialog>
   <dialog id="sources-dialog" class="modal sources-modal"><button class="modal-close" data-close="sources-dialog" aria-label="データ出典を閉じる">×</button><span class="eyebrow">REAL DATA, PLAYFUL STORMS</span><h2>実データで、日本列島。</h2><p class="source-intro">人口分布と標高を、スマートフォンでも遊べる約5kmメッシュへ加工しました。</p><section><h3>人口 · 2020年国勢調査</h3><p>総務省統計局の250m人口総数メッシュを合計。全国 <strong id="source-population-total"></strong> 人を保持しています。地理院地図由来の公開ミラーから取得し、タイル境界の重複を除去しました。</p><a href="https://www.stat.go.jp/data/mesh/" target="_blank" rel="noopener noreferrer">総務省統計局・地域メッシュ統計 ↗</a><a href="https://www.e-stat.go.jp/terms-of-use" target="_blank" rel="noopener noreferrer">e-Stat 利用規約 ↗</a></section><section><h3>標高 · 国土地理院 DEM10B由来</h3><p>約200〜300mへ平均化された標高タイルを、陸地だけ約5kmへ集約。セルの平均標高・高低差を勢力低下に使います。取得元更新は2025年3月、元の測量年は地域ごとに異なります。</p><a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener noreferrer">地理院タイル・出典 ↗</a><a href="https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html" target="_blank" rel="noopener noreferrer">国土地理院コンテンツ利用規約 ↗</a></section><section><h3>海岸線 · Natural Earth</h3><p>1:1000万の地理データ（v5.1.2／Public Domain）を加工。小さな島や埋立地は省略されることがあります。標高が不明なセルは0mとせず「未収録」と表示し、ゲーム上は低地として扱います。</p><a href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener noreferrer">Natural Earth 利用条件 ↗</a></section><p class="source-footnote">人口は実統計ですが、資産と得点はゲーム用の換算です。都市名は周辺メッシュをまとめる目印で、市区町村の行政界ではありません。離島を含む全国データのうち、画面に入る範囲で遊べます。</p><a class="source-repository" href="https://github.com/0052-g/game-taifu/tree/main/data-sources" target="_blank" rel="noopener noreferrer">加工方法・取得元・検証結果を見る ↗</a></dialog>
   <dialog id="result-dialog" class="modal result-modal"><button class="modal-close" data-close="result-dialog" aria-label="結果を閉じて地図を見る">×</button><div class="result-icon">${spiral}</div><span class="eyebrow">STORM REPORT</span><h2 id="result-title">冒険、おつかれさま！</h2><p id="result-reason"></p><div class="result-score"><small>最終被害スコア</small><strong id="result-score">0</strong><span>pt</span><b id="new-best" hidden>NEW BEST!</b></div><div class="result-stats"><div><span>通過した都市</span><strong id="result-cities">0都市</strong></div><div><span>最高勢力</span><strong id="result-strength">0</strong></div><div><span>旅した日数</span><strong id="result-days">0日</strong></div></div><p id="result-tip" class="result-tip"></p><button id="retry" class="primary-button">新しい進路で挑戦 ${arrow}</button><button id="same-route" class="text-button">同じ進路でもう一度 ↻</button></dialog>
 `;
@@ -77,6 +80,8 @@ let lastEvent = 0;
 let best = 0;
 try { best = Math.max(0, Number(localStorage.getItem('taifu-maker-best-population-2020-v1')) || 0); } catch { /* Storage is optional. */ }
 const format = (value: number) => Math.floor(value).toLocaleString('ja-JP');
+const fractionalPoints = new Intl.NumberFormat('ja-JP', { maximumFractionDigits: 3 });
+const pointText = (value: number) => value > 0 && value < 1 ? (value < 0.001 ? '<0.001' : fractionalPoints.format(value)) : format(value);
 $('best-score').textContent = format(best);
 
 $('source-population-total').textContent = format(TOTAL_POPULATION);
@@ -118,6 +123,15 @@ function updateHUD() {
   const currentMesh = meshAt(s.position);
   textIfChanged('mesh-population', format(currentMesh?.population ?? 0));
   textIfChanged('mesh-elevation', currentMesh?.elevationM != null ? `${Math.round(currentMesh.elevationM).toLocaleString('ja-JP')} m` : currentMesh ? '未収録' : '海上');
+  const meshInitial = initialAssetPoints(currentMesh?.population ?? 0);
+  const meshRemaining = currentMesh ? remainingAssetPoints(currentMesh, state) : 0;
+  const remainingPercent = meshInitial > 0 ? Math.max(0, Math.min(100, meshRemaining / meshInitial * 100)) : 0;
+  textIfChanged('mesh-remaining', pointText(meshRemaining));
+  textIfChanged('mesh-initial', pointText(meshInitial));
+  textIfChanged('mesh-remaining-percent', meshInitial > 0 ? `残り ${Math.round(remainingPercent)}%` : '対象なし');
+  textIfChanged('nearby-remaining', pointText(remainingAssetsNear(state, s.position)));
+  $('mesh-remaining-bar').style.width = `${remainingPercent}%`;
+  $('mesh-remaining-meter').setAttribute('aria-valuenow', String(Math.round(remainingPercent)));
   $('mesh-population').parentElement!.title = `${POPULATION_YEAR}年国勢調査・現在の約5kmメッシュの人口総数`;
   $('mesh-elevation').parentElement!.title = '現在の約5kmメッシュの平均標高。点の標高ではありません';
   for (const city of CITIES) {
@@ -335,6 +349,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-layer]').forEach(button => {
     });
     $('terrain-legend').hidden = layer !== 'terrain';
     $('population-legend').hidden = layer !== 'population';
+    $('assets-legend').hidden = layer !== 'assets';
   });
 });
 $('sources-open').addEventListener('click', () => {

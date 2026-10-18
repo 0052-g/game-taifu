@@ -1784,3 +1784,62 @@ canvas {
   .population-legend { font-size:8px; }
   .map-legend .density-scale i { width:44px; }
 }
+
+/* Live asset colors reuse the map's sparse update cache. */
+.assets-legend { justify-content:space-between; }
+.asset-color-scale { gap:9px!important; }
+.map-legend .asset-color-scale i {
+  width:76px;
+  height:7px;
+  border-radius:3px;
+  background:linear-gradient(to right,#9eaaa5,#d9e9c6,#ffd45c);
+}
+.asset-readout {
+  display:grid;
+  grid-template-columns:1.15fr 1fr;
+  gap:8px 24px;
+  padding:14px 20px 12px;
+  border-top:1px solid #e0e6d4;
+  background:#fcfbef;
+}
+.asset-readout-label { color:#839577; font-size:10px; }
+.mesh-asset-summary { position:relative; }
+.asset-readout-value {
+  display:flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:4px 8px;
+  margin-top:4px;
+}
+.asset-readout-value strong {
+  color:#b08835;
+  font-size:25px;
+  font-weight:700;
+  line-height:1.3;
+  font-variant-numeric:tabular-nums;
+}
+.asset-readout-value small { color:#8c997d; font-size:10px; }
+.asset-readout-value small span { color:#a0a68d; }
+.asset-readout-value small b { font-weight:500; }
+.remaining-percent { position:absolute; top:1px; right:0; color:#8b9c78; font-size:9px; }
+.remaining-meter { height:4px; margin-top:8px; overflow:hidden; border-radius:3px; background:#e2e8d7; }
+.remaining-meter i { display:block; height:100%; width:0; background:#d8b34c; border-radius:3px; }
+.nearby-asset-summary { border-left:1px solid #e4e7d6; padding-left:24px; }
+.asset-readout-note { color:#99a087; font-size:9px; }
+.asset-readout-footnote { grid-column:1/-1; margin:0; color:#99a087; font-size:9px; line-height:1.7; }
+@media(max-width:760px) {
+  .layer-switch button { padding:6px 10px; }
+  .assets-legend { font-size:8px; padding-inline:12px; gap:7px; }
+  .map-legend .asset-color-scale i { width:36px; }
+  .asset-color-scale { gap:5px!important; }
+  .asset-readout { padding:12px 14px 10px; gap:9px 13px; }
+  .asset-readout-label { font-size:9px; }
+  .asset-readout-value { gap:3px 5px; }
+  .asset-readout-value strong { font-size:22px; }
+  .asset-readout-value small { font-size:8px; }
+  .asset-readout-value small span { display:block; }
+  .remaining-percent { font-size:8px; }
+  .nearby-asset-summary { padding-left:13px; }
+  .asset-readout-note { font-size:8px; }
+  .asset-readout-footnote { font-size:8px; }
+}
